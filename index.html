@@ -542,6 +542,12 @@
                 selectionRect = null;
                 addPersonBtn.classList.remove('active');
                 viewZoom = 1.0; viewPanX = 0; viewPanY = 0;
+
+                currentEditSessionId = null; 
+                const siteNameInput = document.getElementById('siteName');
+                if (siteNameInput) siteNameInput.value = ''; 
+                const saveDbBtn = document.getElementById('saveDbBtn');
+                if (saveDbBtn) saveDbBtn.textContent = '클라우드(DB)에 저장';
             }
 
             function calculateImageScale() {
