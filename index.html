@@ -314,7 +314,7 @@
 
         .gallery-container {
             display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
+            grid-template-columns: repeat(5, 1fr); 
             gap: 12px;
             margin-top: 15px;
         }
@@ -383,7 +383,7 @@
 
             <div id="galleryWrapper">
                 <div class="gallery-container" id="galleryContainer">
-                    <p style="color:#666;">데이터를 불러오는 중입니다...</p>
+                    <p style="color:#666; grid-column: span 5; margin: 0;">데이터를 불러오는 중입니다...</p>
                 </div>
             </div>
         </div>
