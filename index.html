@@ -515,11 +515,11 @@
             imageLoader.addEventListener('change', function (e) {
                 if (e.target.files.length === 0) return;
                 const reader = new FileReader();
-                reader.onload = function (event) {
-                    originalImageDataUrl = event.target.result;
+                reader.onload = function (event) {                    
                     img = new Image();
                     img.onload = function () {
                         resetData();
+                        originalImageDataUrl = event.target.result;
                         peopleCount.textContent = '분석 중...';
                         calculateImageScale();
                         drawAll();
