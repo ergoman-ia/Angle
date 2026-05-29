@@ -311,33 +311,40 @@
             border-top: 2px dashed #ccc;
             padding-top: 15px;
         }
+
         .gallery-container {
             display: flex;
             flex-wrap: wrap;
             gap: 12px;
         }
+
         .thumb-card {
             position: relative;
-            width: 130px; /* 기존 220px에서 약 60% 수준으로 축소 */
+            width: 130px;
+            /* 기존 220px에서 약 60% 수준으로 축소 */
             background: #fff;
             border: 1px solid #ddd;
             border-radius: 6px;
             padding: 5px;
             cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
             transition: transform 0.2s, box-shadow 0.2s;
         }
+
         .thumb-card:hover {
             transform: translateY(-3px);
-            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
         }
+
         .thumb-card img {
             width: 100%;
-            height: 90px; /* 기존 150px에서 축소 */
+            height: 90px;
+            /* 기존 150px에서 축소 */
             object-fit: contain;
             background: #f8f9fa;
             border-radius: 4px;
         }
+
         .btn-delete-thumb {
             position: absolute;
             top: -8px;
@@ -351,14 +358,17 @@
             font-size: 12px;
             font-weight: bold;
             cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
             z-index: 10;
             display: flex;
             align-items: center;
             justify-content: center;
             padding: 0;
         }
-        .btn-delete-thumb:hover { background: #c82333; }
+
+        .btn-delete-thumb:hover {
+            background: #c82333;
+        }
     </style>
 </head>
 
@@ -372,7 +382,6 @@
             <canvas id="canvas" width="800" height="600"></canvas>
 
             <div id="galleryWrapper">
-                <h2>📂 저장된 작업 내역 (클릭하여 수정)</h2>
                 <div class="gallery-container" id="galleryContainer">
                     <p style="color:#666;">데이터를 불러오는 중입니다...</p>
                 </div>
@@ -401,17 +410,18 @@
                     <span style="color:#f03f20; font-weight:bold;">※동 각도분석 자료를 인간공학 평가도구에 활용</span>
                 </div>
             </div>
-            <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
-            <button class="save" id="saveBtn">분석 이미지 인쇄</button>
-
+            
             <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
             <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
-                <input type="text" id="siteName" placeholder="현장명 입력 (예: A구역)"
-                    style="padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
-                <input type="text" id="workerName" placeholder="작업자명 입력 (예: 홍길동)"
-                    style="padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+                <input type="text" id="siteName" placeholder="현장명 입력 (예: A구역)" style="padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
             </div>
             <button class="save" id="saveDbBtn" style="background-color: #007BFF;">클라우드(DB)에 저장</button>
+
+            <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
+            <div style="display: flex; gap: 10px;">
+                <button class="save" id="saveBtn" style="flex: 1;">분석 이미지 인쇄</button>
+                <button class="save" id="exportCsvBtn" style="flex: 1; background-color: #17a2b8;">DB to CSV</button>
+            </div>
 
         </div>
 
@@ -1571,21 +1581,117 @@
                 person.manualAngles.forEach(a => { if (a) a.points.forEach(p => minX = Math.min(minX, p.x)); });
                 return minX;
             }
+            
+            // 실제 이미지 좌표 → 현재 뷰(줌+패닝) 기준 canvas 좌표
+            function tx(x) { return (x * imgScale + imgOffsetX) * viewZoom + viewPanX; }
+            function ty(y) { return (y * imgScale + imgOffsetY) * viewZoom + viewPanY; }
 
-            // [수정된 DB 저장 로직: 새로 만들기 / 덮어쓰기 지원]
+            // ─── 편집 상태 관리를 위한 전역 변수 ───
+            let currentEditSessionId = null; // null이면 '새로 만들기', 값이 있으면 '수정(업데이트)'
+
+            // ─── 1. DB에서 리스트 불러와서 썸네일 그리기 ───
+            async function loadGallery() {
+                const gallery = document.getElementById('galleryContainer');
+                try {
+                    const querySnapshot = await window.fsGetDocs(window.fsCollection(window.fbDb, "sessions"));
+                    gallery.innerHTML = ''; 
+
+                    if (querySnapshot.empty) {
+                        gallery.innerHTML = '<p style="color:#666; font-size:13px;">저장된 작업 내역이 없습니다.</p>';
+                        return;
+                    }
+
+                    querySnapshot.forEach((doc) => {
+                        const data = doc.data();
+                        const sessionId = doc.id;
+                        
+                        const card = document.createElement('div');
+                        card.className = 'thumb-card';
+                        card.innerHTML = `
+                            <button class="btn-delete-thumb" title="삭제">X</button>
+                            <img src="${data.exportImageData}" alt="썸네일" />
+                            <div class="thumb-info">
+                                <div><strong>현장:</strong> ${data.siteName || '미지정'}</div>
+                                <div style="font-size:11px; color:#888; margin-top:4px;">ID: ${sessionId.replace('session_','')}</div>
+                            </div>
+                        `;
+
+                        card.querySelector('img').addEventListener('click', () => loadSessionForEdit(sessionId, data));
+                        card.querySelector('.btn-delete-thumb').addEventListener('click', (e) => {
+                            e.stopPropagation(); 
+                            deleteSession(sessionId);
+                        });
+
+                        gallery.appendChild(card);
+                    });
+                } catch (error) {
+                    console.error("갤러리 로드 에러:", error);
+                    gallery.innerHTML = '<p style="color:red;">데이터를 불러오는데 실패했습니다.</p>';
+                }
+            }
+
+            // ─── 2. 썸네일 클릭 시 불러오기 ───
+            function loadSessionForEdit(sessionId, data) {
+                statusMsg.textContent = "데이터 불러오는 중...";
+                statusMsg.style.color = "#e67e22";
+
+                currentEditSessionId = sessionId; 
+                // 👇 현장명 입력란에 데이터 채워주기 복구
+                document.getElementById('siteName').value = data.siteName || '';
+                document.getElementById('saveDbBtn').textContent = "클라우드(DB) 업데이트"; 
+
+                img = new Image();
+                img.onload = function () {
+                    viewZoom = 1.0; viewPanX = 0; viewPanY = 0;
+                    calculateImageScale();
+                    personDataList = JSON.parse(data.personDataList);
+                    activePersonIndex = personDataList.length > 0 ? 0 : -1;
+                    originalImageDataUrl = data.originalImageData; 
+
+                    drawAll();
+                    statusMsg.textContent = "불러오기 완료. 수정 가능합니다.";
+                    statusMsg.style.color = "#28a745";
+                    window.scrollTo({ top: 0, behavior: 'smooth' }); 
+                };
+                img.src = data.originalImageData;
+            }
+
+            // ─── 3. 삭제 기능 (DB 전용) ───
+            async function deleteSession(sessionId) {
+                if (!confirm("정말 이 작업 내역을 삭제하시겠습니까?\n(데이터베이스에서 영구 삭제됩니다)")) return;
+
+                try {
+                    await window.fsDeleteDoc(window.fsDoc(window.fbDb, "sessions", sessionId));
+                    alert("삭제되었습니다.");
+
+                    // 만약 현재 캔버스에 띄워놓고 편집 중이던 세션을 삭제했다면 화면 초기화
+                    if (currentEditSessionId === sessionId) {
+                        currentEditSessionId = null;
+                        document.getElementById('siteName').value = '';
+                        document.getElementById('workerName').value = '';
+                        document.getElementById('saveDbBtn').textContent = "클라우드(DB)에 저장";
+                        resetData(); img = new Image(); drawAll();
+                    }
+
+                    loadGallery(); // 삭제 후 갤러리 갱신
+                } catch (error) {
+                    console.error("삭제 오류:", error);
+                    alert("삭제 중 오류가 발생했습니다.");
+                }
+            }
+
+            // ─── 4. DB 저장 이벤트 (현장명 포함) ───
             document.getElementById('saveDbBtn').addEventListener('click', async function () {
                 if (!originalImageDataUrl || personDataList.length === 0) {
                     alert("업로드된 이미지가 없거나 분석된 데이터가 없습니다.");
                     return;
                 }
-
+                
+                // 👇 현장명 값 가져오기
                 const siteName = document.getElementById('siteName').value.trim() || "미지정 현장";
-                const workerName = document.getElementById('workerName').value.trim() || "미지정 작업자";
-
                 const now = new Date();
                 const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-
-                // 💡 편집(Update) 중이면 기존 ID 유지, 신규(Create)면 새 ID 발급
+                
                 const isUpdating = (currentEditSessionId !== null);
                 const sessionId = isUpdating ? currentEditSessionId : `session_${timestamp}`;
 
@@ -1594,34 +1700,29 @@
                     statusMsg.style.color = "#007BFF";
                     this.disabled = true;
 
-                    // 1. 분석 결과 PNG 데이터 생성 및 압축
                     const originalHeight = canvas.height;
                     const extraHeight = 220;
                     canvas.height = originalHeight + extraHeight;
-                    drawAll(true);
+                    drawAll(true); 
                     const rawExportDataUrl = canvas.toDataURL('image/png');
-                    canvas.height = originalHeight;
+                    canvas.height = originalHeight; 
                     drawAll(false);
 
                     statusMsg.textContent = "이미지 최적화 압축 중...";
-                    // (※주의: 이미 DB에서 불러온 압축된 사진이라도 통일성을 위해 한번 더 통과시킵니다.)
                     const compressedOriginal = await compressImage(originalImageDataUrl, 1000, 0.6);
                     const compressedExport = await compressImage(rawExportDataUrl, 1000, 0.6);
 
-                    // 2. Firestore에 데이터 페이로드(Payload) 구성
                     statusMsg.textContent = "DB 전송 중...";
                     const cleanPersonData = JSON.parse(JSON.stringify(personDataList));
                     const docRef = window.fsDoc(window.fbDb, "sessions", sessionId);
 
                     const payload = {
-                        siteName: siteName,
-                        workerName: workerName,
+                        siteName: siteName, // 👇 DB에 현장명 포함
                         personDataList: JSON.stringify(cleanPersonData),
-                        originalImageData: compressedOriginal,
-                        exportImageData: compressedExport
+                        originalImageData: compressedOriginal, 
+                        exportImageData: compressedExport      
                     };
 
-                    // 3. 분기 처리 (업데이트 vs 신규)
                     if (isUpdating) {
                         payload.updatedAt = window.fsServerTimestamp();
                         await window.fsUpdateDoc(docRef, payload);
@@ -1629,13 +1730,12 @@
                     } else {
                         payload.createdAt = window.fsServerTimestamp();
                         await window.fsSetDoc(docRef, payload);
-                        alert("새 데이터가 스토리지 없이 DB에 저장 완료되었습니다!");
+                        alert("새 데이터가 DB에 저장 완료되었습니다!");
                     }
 
                     statusMsg.textContent = "저장 완료";
                     statusMsg.style.color = "#28a745";
-
-                    // 저장 성공 후 현재 세션을 '편집 모드'로 유지하고 갤러리 갱신
+                    
                     currentEditSessionId = sessionId;
                     this.textContent = "클라우드(DB) 업데이트";
                     loadGallery();
@@ -1676,111 +1776,88 @@
                 });
             }
 
-            // 실제 이미지 좌표 → 현재 뷰(줌+패닝) 기준 canvas 좌표
-            function tx(x) { return (x * imgScale + imgOffsetX) * viewZoom + viewPanX; }
-            function ty(y) { return (y * imgScale + imgOffsetY) * viewZoom + viewPanY; }
+            // ✅ 페이지 로드 후 약간의 지연을 주고 갤러리를 자동으로 불러옴
+            setTimeout(() => { loadGallery(); }, 1500);
 
-            // ─── 편집 상태 관리를 위한 전역 변수 ───
-            let currentEditSessionId = null; // null이면 '새로 만들기', 값이 있으면 '수정(업데이트)'
-
-            // ─── 1. DB에서 리스트 불러와서 썸네일 그리기 ───
-            async function loadGallery() {
-                const gallery = document.getElementById('galleryContainer');
+            // ─── [신규 추가] DB 전체 데이터를 CSV로 추출 ───
+            document.getElementById('exportCsvBtn').addEventListener('click', async function () {
                 try {
+                    statusMsg.textContent = "CSV 데이터 추출 중...";
                     const querySnapshot = await window.fsGetDocs(window.fsCollection(window.fbDb, "sessions"));
-                    gallery.innerHTML = '';
-
+                    
                     if (querySnapshot.empty) {
-                        gallery.innerHTML = '<p style="color:#666;">저장된 작업 내역이 없습니다.</p>';
+                        alert("추출할 데이터가 없습니다.");
+                        statusMsg.textContent = "추출할 데이터 없음";
                         return;
                     }
 
-                    querySnapshot.forEach((doc) => {
+                    // 엑셀에서 한글 깨짐 방지를 위한 UTF-8 BOM(\uFEFF) 삽입
+                    let csvContent = "\uFEFF"; 
+                    // CSV 헤더 작성
+                    csvContent += "현장명,저장일시,작업자,목,허리,윗팔(좌),윗팔(우),아랫팔(좌),아랫팔(우),손목(좌),손목(우),다리(좌),다리(우)\n";
+
+                    querySnapshot.forEach(doc => {
                         const data = doc.data();
-                        const sessionId = doc.id;
+                        // 엑셀 셀 나뉨 방지를 위해 현장명 내부의 쉼표(,)를 공백으로 치환
+                        const siteName = (data.siteName || "미지정").replace(/,/g, " "); 
+                        const sessionTime = doc.id.replace('session_', ''); // 20260529_133021 형태
+                        
+                        let persons = [];
+                        try { persons = JSON.parse(data.personDataList); } catch(e) {}
 
-                        const card = document.createElement('div');
-                        card.className = 'thumb-card';
-                        card.innerHTML = `
-                            <button class="btn-delete-thumb" title="삭제">X</button>
-                            <img src="${data.exportImageData}" alt="썸네일" title="${data.siteName} / ${data.workerName}" />
-                        `;
+                        // 한 사진 내의 여러 작업자를 순회하며 각 행(Row) 생성
+                        persons.forEach((person, idx) => {
+                            // 각도 추출 헬퍼 함수 (값이 없으면 '-' 반환, 음수면 젖힘 표기)
+                            const getAngle = (partIdx) => {
+                                const d = person.angles[partIdx];
+                                if (!d) return "-";
+                                return d.angle < 0 ? `${Math.abs(d.angle).toFixed(0)}(젖힘)` : `${d.angle.toFixed(0)}`;
+                            };
 
-                        // 썸네일(이미지) 클릭 시 편집 모드로 불러오기
-                        card.querySelector('img').addEventListener('click', () => loadSessionForEdit(sessionId, data));
-
-                        // 삭제 버튼 클릭 이벤트
-                        card.querySelector('.btn-delete-thumb').addEventListener('click', (e) => {
-                            e.stopPropagation(); // 카드 클릭 이벤트와 겹치지 않게 방지
-                            deleteSession(sessionId);
+                            const row = [
+                                siteName,
+                                sessionTime,
+                                `작업자 ${idx + 1}`,
+                                getAngle(0), // 목
+                                getAngle(1), // 허리
+                                getAngle(6), // 윗팔(좌)
+                                getAngle(2), // 윗팔(우)
+                                getAngle(7), // 아랫팔(좌)
+                                getAngle(3), // 아랫팔(우)
+                                getAngle(8), // 손목(좌)
+                                getAngle(4), // 손목(우)
+                                getAngle(9), // 다리(좌)
+                                getAngle(5)  // 다리(우)
+                            ];
+                            
+                            csvContent += row.join(",") + "\n";
                         });
-
-                        gallery.appendChild(card);
                     });
-                } catch (error) {
-                    console.error("갤러리 로드 에러:", error);
-                    gallery.innerHTML = '<p style="color:red;">데이터를 불러오는데 실패했습니다.</p>';
-                }
-            }
 
-            // ─── 2. 썸네일 클릭 시 캔버스로 정보 다시 불러오기 (수정 모드) ───
-            function loadSessionForEdit(sessionId, data) {
-                statusMsg.textContent = "데이터 불러오는 중...";
-                statusMsg.style.color = "#e67e22";
+                    // CSV 파일 생성 및 브라우저 다운로드 트리거
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    const url = URL.createObjectURL(blob);
+                    
+                    const now = new Date();
+                    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+                    
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", `자세분석_DB전체데이터_${dateStr}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
 
-                currentEditSessionId = sessionId;
-                document.getElementById('siteName').value = data.siteName || '';
-                document.getElementById('workerName').value = data.workerName || '';
-                document.getElementById('saveDbBtn').textContent = "클라우드(DB) 업데이트";
-
-                // DB에 저장되어 있던 원본 Base64 이미지를 로드
-                img = new Image();
-                img.onload = function () {
-                    // 화면 초기화 및 세팅
-                    viewZoom = 1.0; viewPanX = 0; viewPanY = 0;
-                    calculateImageScale();
-
-                    // DB에서 불러온 JSON 문자열을 배열 데이터로 복원
-                    personDataList = JSON.parse(data.personDataList);
-                    activePersonIndex = personDataList.length > 0 ? 0 : -1;
-
-                    // 저장 시 재사용을 위해 전역 변수에 원본 데이터 다시 세팅
-                    originalImageDataUrl = data.originalImageData;
-
-                    drawAll();
-                    statusMsg.textContent = "불러오기 완료. 수정 가능합니다.";
+                    statusMsg.textContent = "CSV 추출 완료";
                     statusMsg.style.color = "#28a745";
-                    window.scrollTo({ top: 0, behavior: 'smooth' }); // 화면 맨 위로 스크롤
-                };
-                img.src = data.originalImageData;
-            }
 
-            // ─── 3. 삭제 기능 (DB 전용) ───
-            async function deleteSession(sessionId) {
-                if (!confirm("정말 이 작업 내역을 삭제하시겠습니까?\n(데이터베이스에서 영구 삭제됩니다)")) return;
-
-                try {
-                    await window.fsDeleteDoc(window.fsDoc(window.fbDb, "sessions", sessionId));
-                    alert("삭제되었습니다.");
-
-                    // 만약 현재 캔버스에 띄워놓고 편집 중이던 세션을 삭제했다면 화면 초기화
-                    if (currentEditSessionId === sessionId) {
-                        currentEditSessionId = null;
-                        document.getElementById('siteName').value = '';
-                        document.getElementById('workerName').value = '';
-                        document.getElementById('saveDbBtn').textContent = "클라우드(DB)에 저장";
-                        resetData(); img = new Image(); drawAll();
-                    }
-
-                    loadGallery(); // 삭제 후 갤러리 갱신
                 } catch (error) {
-                    console.error("삭제 오류:", error);
-                    alert("삭제 중 오류가 발생했습니다.");
+                    console.error("CSV 추출 오류:", error);
+                    alert("CSV 데이터를 구성하는 중 오류가 발생했습니다.");
+                    statusMsg.textContent = "CSV 추출 실패";
+                    statusMsg.style.color = "#e74c3c";
                 }
-            }
-
-            // ✅ 페이지 로드 후 약간의 지연을 주고 갤러리를 자동으로 불러옴
-            setTimeout(() => { loadGallery(); }, 1500);
+            });
         </script>
 </body>
 
