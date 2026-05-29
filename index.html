@@ -64,7 +64,7 @@
             margin-top: 50px;
             width: 800px;
             height: 600px;
-            display: block;
+            display: block;            
             cursor: crosshair;
             background-color: #eee;
         }
@@ -1198,11 +1198,15 @@
                         let minX = 99999, maxX = -99999, minY = 99999, maxY = -99999;
                         let hasPoints = false;
                         if (person.rawPose) {
-                            const xs = person.rawPose.keypoints.map(k => k.x);
-                            const ys = person.rawPose.keypoints.map(k => k.y);
-                            minX = Math.min(...xs); maxX = Math.max(...xs);
-                            minY = Math.min(...ys); maxY = Math.max(...ys);
-                            hasPoints = true;
+                            // 화면 박스도 신뢰도 0.1 이상인 점들만 기준으로 크기를 잡도록 수정
+                            const validPoints = person.rawPose.keypoints.filter(k => k.score > 0.1);
+                            if (validPoints.length > 0) {
+                                const xs = validPoints.map(k => k.x);
+                                const ys = validPoints.map(k => k.y);
+                                minX = Math.min(...xs); maxX = Math.max(...xs);
+                                minY = Math.min(...ys); maxY = Math.max(...ys);
+                                hasPoints = true;
+                            }
                         } else {
                             let allPts = [];
                             person.angles.forEach(a => { if (a) allPts.push(...a.points); });
@@ -1577,15 +1581,19 @@
                 ctx.textBaseline = 'alphabetic';
             }
 
-            // [신규 추가] 작업자의 X 좌표(왼쪽)를 기준으로 정렬하기 위한 헬퍼 함수
+            // [수정됨] 엉뚱한 점수(score)의 관절이 정렬을 망치는 것을 방지
             function getPersonMinX(person) {
                 if (person.rawPose) {
-                    return Math.min(...person.rawPose.keypoints.map(k => k.x));
+                    // 신뢰도가 0.1 이상인 의미 있는 관절점들만 필터링
+                    const validPoints = person.rawPose.keypoints.filter(k => k.score > 0.1);
+                    if (validPoints.length > 0) {
+                        return Math.min(...validPoints.map(k => k.x));
+                    }
                 }
                 let minX = 99999;
                 person.angles.forEach(a => { if (a) a.points.forEach(p => minX = Math.min(minX, p.x)); });
                 person.manualAngles.forEach(a => { if (a) a.points.forEach(p => minX = Math.min(minX, p.x)); });
-                return minX;
+                return minX === 99999 ? 0 : minX;
             }
             
             // 실제 이미지 좌표 → 현재 뷰(줌+패닝) 기준 canvas 좌표
