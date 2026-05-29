@@ -703,7 +703,11 @@
                     const hm = { x: (k[11].x + k[12].x) / 2, y: (k[11].y + k[12].y) / 2 };
                     const dist = Math.hypot(sm.x - hm.x, sm.y - hm.y);
                     const pv = { x: hm.x, y: hm.y - dist };
-                    personData.angles[1] = { points: [pv, hm, sm], angle: calculateAngle(pv, hm, sm) };
+                    let angle = calculateAngle(pv, hm, sm);
+                    // 어깨 중점이 골반 중점보다 수직선 뒤쪽이면 젖힘
+                    const isExt = isFacingRight ? sm.x < hm.x : sm.x > hm.x;
+                    if (isExt) angle = -angle;
+                    personData.angles[1] = { points: [pv, hm, sm], angle };
                 } else {
                     const si = isFacingRight ? 6 : 5;
                     const hi = isFacingRight ? 12 : 11;
@@ -997,14 +1001,10 @@
                         }
                         // 허리(1): 정면 양측이면 젖힘 판단 생략, 단측이면 기존 로직
                         if (globalIndex === 1) {
-                            const activeData = personDataList[activePersonIndex];
-                            const isFrontal = activeData.isBilateral && activeData.isBilateral.arms && activeData.isBilateral.legs;
-                            if (!isFrontal) {
-                                const hip = data.points[1];
-                                const shoulder = data.points[2];
-                                let isTrunkExt = isFacingRight ? shoulder.x < hip.x : shoulder.x > hip.x;
-                                if (isTrunkExt) newAngle = -newAngle;
-                            }
+                            const hip = data.points[1];
+                            const shoulder = data.points[2];
+                            let isTrunkExt = isFacingRight ? shoulder.x < hip.x : shoulder.x > hip.x;
+                            if (isTrunkExt) newAngle = -newAngle;
                         }
                     }
 
