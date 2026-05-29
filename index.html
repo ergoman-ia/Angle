@@ -1609,11 +1609,7 @@
                         card.className = 'thumb-card';
                         card.innerHTML = `
                             <button class="btn-delete-thumb" title="삭제">X</button>
-                            <img src="${data.exportImageData}" alt="썸네일" />
-                            <div class="thumb-info">
-                                <div><strong>현장:</strong> ${data.siteName || '미지정'}</div>
-                                <div style="font-size:11px; color:#888; margin-top:4px;">ID: ${sessionId.replace('session_','')}</div>
-                            </div>
+                            <img src="${data.exportImageData}" alt="썸네일" title="현장: ${data.siteName || '미지정'}" />
                         `;
 
                         card.querySelector('img').addEventListener('click', () => loadSessionForEdit(sessionId, data));
