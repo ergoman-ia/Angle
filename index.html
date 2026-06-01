@@ -1257,8 +1257,8 @@
                     pData.angles.forEach((angleData, i) => {
                         if (!angleData) return;
                         // 양측 미감지 시 좌측 슬롯(6~9) 건너뜀
-                        if (i >= 6 && i <= 8 && !pData.isBilateral.arms) return;
-                        if (i === 9 && !pData.isBilateral.legs) return;
+                        // if (i >= 6 && i <= 8 && !pData.isBilateral.arms) return;
+                        // if (i === 9 && !pData.isBilateral.legs) return;
                         drawAngle(angleData, getDisplayMeta(i, pData), isExporting, i);
                     });
 
