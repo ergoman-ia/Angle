@@ -2179,11 +2179,31 @@
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
                 
                 // ─── [3D 입체감(Z축) 및 방향 완벽 복원 로직] ───
-                const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
-                const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
+                // 🌟 수정: AI의 엉터리 점수(score) 판별을 버리고, 
+                // 선생님께서 2D 패널에서 직접 확인/수정하신 '실제 데이터 존재 여부'를 절대 기준으로 삼습니다!
                 
-                // 우측면 관절 점수가 높다면 오른쪽 팔다리가 카메라에 더 가까운(앞에 있는) 상태입니다.
-                const isRightCloser = rightScore > leftScore;
+                const hasRightArm = !!person.angles[2] || !!person.angles[3]; // 우측 팔 데이터 유무
+                const hasLeftArm  = !!person.angles[6] || !!person.angles[7]; // 좌측 팔 데이터 유무
+                const hasRightLeg = !!person.angles[5]; // 우측 다리 데이터 유무
+                const hasLeftLeg  = !!person.angles[9]; // 좌측 다리 데이터 유무
+
+                let isRightCloser = false;
+
+                // 2D 패널에 우측 부위만 활성화되어 있다면 무조건 우측이 앞(카메라 쪽), 좌측만 있다면 좌측이 앞입니다!
+                if (hasRightArm && !hasLeftArm) {
+                    isRightCloser = true;
+                } else if (hasLeftArm && !hasRightArm) {
+                    isRightCloser = false;
+                } else if (hasRightLeg && !hasLeftLeg) {
+                    isRightCloser = true;
+                } else if (hasLeftLeg && !hasRightLeg) {
+                    isRightCloser = false;
+                } else {
+                    // 양측이 모두 감지된 완벽한 정면이거나 양측 모두 데이터가 없는 경우에만 AI 원본 점수로 보조 판단
+                    const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
+                    const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
+                    isRightCloser = rightScore > leftScore;
+                }
 
                 // 🌟 마스터 키: 현재 캔버스 렌더러는 마이너스(-) Z값이 앞쪽(카메라 쪽)입니다!
                 const Z_DIR = -1; 
