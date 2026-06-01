@@ -2189,7 +2189,6 @@
                 const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
                 const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
 
-                // 👇 수정: 절대값이 아닌 "이전에 보정한 값 대비 얼마나 더 움직였는가(변화량, Delta)"만 계산
                 const deltaCamYaw = modalCamYaw - (person.camYaw || 0);
                 const deltaTrunkYaw = modalTrunkYaw - (person.trunkYaw || 0);
                 const deltaNeckYaw = modalNeckYaw - (person.neckYaw || 0);
@@ -2198,35 +2197,27 @@
                 const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
 
-                // ─── [3D 입체감(Z축) 및 방향 완벽 복원 로직] ───
-                // 🌟 핵심 교정 1: AI의 점수 대신, 사용자가 2D 패널에 남겨둔 '다리(좌/우)' 데이터를 최우선 기준으로 삼습니다.
+                // 🌟 [수정됨] 회전과 무관하게 2D 패널 상태만을 기준으로 고정된(Baseline) 방향성 확립
                 const rightLeg = !!person.angles[5];
                 const leftLeg = !!person.angles[9];
                 const rightArm = !!person.angles[2] || !!person.angles[3];
                 const leftArm = !!person.angles[6] || !!person.angles[7];
 
-                let isRightCloser = true;
-                if (leftLeg && !rightLeg) {
-                    isRightCloser = false; // 좌측 다리만 2D 패널에 있으면 무조건 좌측이 앞
-                } else if (rightLeg && !leftLeg) {
-                    isRightCloser = true;  // 우측 다리만 있으면 무조건 우측이 앞
-                } else if (leftArm && !rightArm) {
-                    isRightCloser = false; // 다리가 없고 좌측 팔만 있으면 좌측이 앞
-                } else if (rightArm && !leftArm) {
-                    isRightCloser = true;  // 우측 팔만 있으면 우측이 앞
-                } else {
-                    // 양측 모두 있거나 없는 정면의 경우, AI 원본 점수로 보조 판단
-                    const lScore = (kps[5].score + kps[7].score + kps[11].score);
-                    const rScore = (kps[6].score + kps[8].score + kps[12].score);
-                    isRightCloser = rScore >= lScore;
+                let isRightCloserBaseline = true;
+                if (leftLeg && !rightLeg) isRightCloserBaseline = false;
+                else if (rightLeg && !leftLeg) isRightCloserBaseline = true;
+                else if (leftArm && !rightArm) isRightCloserBaseline = false;
+                else if (rightArm && !leftArm) isRightCloserBaseline = true;
+                else {
+                    // 패널 정보가 부족할 때만 초기 위치 기준으로 판별 (이후 회전해도 고정됨)
+                    isRightCloserBaseline = rh.x < lh.x; 
                 }
 
-                // 🌟 마스터 키: 마이너스(-) Z값이 카메라 앞쪽으로 튀어나옵니다.
                 const Z_DIR = -1;
 
-                // 🌟 핵심 교정 2: 정면 자세일 때 억지로 비틀리는 현상 완벽 방지 (인체 비례 스케일 동적 적용)
-                let maxBone = 50; // 기준이 될 가장 긴 뼈의 길이
-                const bones = [[11, 13], [12, 14], [5, 11], [6, 12]]; // 허벅지, 몸통
+                // 인체 비례 스케일 동적 적용 (비틀림 방지)
+                let maxBone = 50;
+                const bones = [[11, 13], [12, 14], [5, 11], [6, 12]];
                 bones.forEach(b => {
                     const p1 = kps[b[0]], p2 = kps[b[1]];
                     if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
@@ -2235,45 +2226,40 @@
                     }
                 });
 
-                // 가장 긴 뼈를 기준으로 해당 작업자의 100% 어깨/골반 너비 산출
                 const idealShoulderW = Math.max(maxBone * 0.8, 50);
                 const idealHipW = Math.max(maxBone * 0.6, 40);
 
-                // 어깨 깊이(Z) 산출 (정면이면 dzS가 0이 되어 비틀림 발생 안 함!)
                 const actualShoulderW = Math.abs(rs.x - ls.x);
                 const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
                 const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
 
-                // 골반 깊이(Z) 산출
                 const actualHipW = Math.abs(rh.x - lh.x);
                 const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
                 const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
 
-                // 앞/뒤 Z값 최종 배정
-                const zRightShoulder = isRightCloser ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
-                const zLeftShoulder = isRightCloser ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
+                // 베이스라인(isRightCloserBaseline)을 기준으로 Z값 확정
+                const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
-                const zRightHip = isRightCloser ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
-                const zLeftHip = isRightCloser ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
+                const zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
-                // 2. 운동학적 회전 계산 (순차적 적용)
+                // 2. 운동학적 회전 계산
                 rotatedPoints3D = kps.map((pt, idx) => {
                     let x = pt.x;
                     let y = pt.y;
                     let z = 0;
 
-                    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;        // 왼쪽 팔 전체
-                    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder; // 오른쪽 팔 전체
-                    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;     // 왼쪽 다리 전체
-                    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;    // 오른쪽 다리 전체
+                    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;
+                    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder;
+                    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;
+                    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;
 
-                    // 얼굴 부위 (코가 가장 입체적으로 앞으로 나오게 설정)
                     if (idx === 0) z = 35 * Z_DIR;
                     else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
 
                     let finalX = x, finalZ = z;
 
-                    // [Step A] 목 비틀림 (어깨 중심축 기준 회전) - 0~4번(머리) 점에만 적용
                     if (idx <= 4) {
                         let rx = finalX - shoulderMid.x;
                         let rz = finalZ;
@@ -2281,7 +2267,6 @@
                         finalZ = rx * Math.sin(neckRad) + rz * Math.cos(neckRad);
                     }
 
-                    // [Step B] 몸통 비틀림 (골반 중심축 기준 회전) - 0~10번(상체 전체) 점에만 적용
                     if (idx <= 10) {
                         let rx = finalX - pelvisMid.x;
                         let rz = finalZ;
@@ -2289,54 +2274,72 @@
                         finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
                     }
 
-                    // [Step C] 전체 시점 회전 (카메라 보정) - 0~16번 모든 점에 적용
+                    // 카메라 시점 회전
                     let rx = finalX - pelvisMid.x;
                     let rz = finalZ;
                     finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
                     finalZ = rx * Math.sin(camRad) + rz * Math.cos(camRad);
 
                     return {
-                        rawX: finalX, // 보정 후 원본 스케일 좌표
+                        rawX: finalX,
                         rawY: y,
-                        x: (finalX - pelvisMid.x) + (canvas.width / 2), // 캔버스 투영용 중앙 정렬 좌표
+                        x: (finalX - pelvisMid.x) + (canvas.width / 2),
                         y: (y - pelvisMid.y) + (canvas.height / 2),
-                        z: finalZ,
+                        z: finalZ, // 회전이 반영된 실제 깊이
                         score: pt.score
                     };
                 });
 
-                // 3. 뼈대 그리기 (목 포함)
+                // 🌟 [수정됨] Z-Sorting 렌더링: 뒤에 있는 뼈(배경)를 먼저 그리고, 앞에 있는 뼈(전경)를 나중에 덮어 그립니다.
+                drawSkeletonLayers(rotatedPoints3D, ctx, "background");
+                drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
+            }
+
+            // 💡 [신규 헬퍼 함수] 레이어 분리 드로잉
+            function drawSkeletonLayers(points, ctx, layerType) {
                 const connections = [
-                    // 머리-목 라인 추가 (코-양눈-양귀 연결 생략, 어깨중심과 코 연결)
-                    [0, 5], [0, 6],
-                    // 상체 및 팔
-                    [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
-                    // 몸통
-                    [5, 11], [6, 12], [11, 12],
-                    // 하체
-                    [11, 13], [13, 15], [12, 14], [14, 16]
+                    [0, 5], [0, 6], [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+                    [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
                 ];
 
                 ctx.lineWidth = 3;
                 connections.forEach(([i, j]) => {
-                    const p1 = rotatedPoints3D[i], p2 = rotatedPoints3D[j];
+                    const p1 = points[i], p2 = points[j];
                     if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
-                        ctx.beginPath();
-                        ctx.strokeStyle = p1.z > 0 ? '#00e5ff' : '#0055ff';
-                        ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
-                        ctx.stroke();
+                        // 선의 중간 지점 깊이를 계산하여 소속 레이어 판별 (Z가 클수록 뒤쪽)
+                        const midZ = (p1.z + p2.z) / 2;
+                        const isBackgroundLine = midZ > 0; 
+                        
+                        if ((layerType === "background" && isBackgroundLine) || 
+                            (layerType === "foreground" && !isBackgroundLine)) {
+                            
+                            ctx.beginPath();
+                            // 뒤쪽(배경) 선은 어두운 파란색, 앞쪽(전경) 선은 밝은 하늘색
+                            ctx.strokeStyle = isBackgroundLine ? '#0055ff' : '#00e5ff';
+                            ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+                            ctx.stroke();
+                        }
                     }
                 });
 
-                // 4. 관절 점 그리기 (목/얼굴 0~4번 포함)
-                rotatedPoints3D.forEach((pt, idx) => {
+                points.forEach((pt, idx) => {
                     if (pt.score > 0.1) {
-                        ctx.beginPath();
-                        const radius = Math.max(3, 7 - (pt.z * 0.05));
-                        ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
-                        // 부위별 색상 구분 (목/머리는 노랑, 상체는 흰색)
-                        ctx.fillStyle = idx <= 4 ? '#ffeaa7' : '#ffffff';
-                        ctx.fill();
+                        const isBackgroundPt = pt.z > 0;
+                        if ((layerType === "background" && isBackgroundPt) || 
+                            (layerType === "foreground" && !isBackgroundPt)) {
+                            
+                            ctx.beginPath();
+                            const radius = Math.max(3, 7 - (pt.z * 0.05));
+                            ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
+                            
+                            if (isBackgroundPt) {
+                                // 뒤에 있는 관절은 어둡게 처리하여 원근감 강조
+                                ctx.fillStyle = idx <= 4 ? '#b8a670' : '#cccccc';
+                            } else {
+                                ctx.fillStyle = idx <= 4 ? '#ffeaa7' : '#ffffff';
+                            }
+                            ctx.fill();
+                        }
                     }
                 });
             }
