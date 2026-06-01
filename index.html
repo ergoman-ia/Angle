@@ -2178,38 +2178,39 @@
                 const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
                 
-                // 👇 수정: 정면/측면 판별 및 Z축 부호(방향) 완벽 교정
+                // ─── [3D 입체감(Z축) 및 방향 완벽 복원 로직] ───
                 const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
                 const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
-                const isFacingRight = rightScore >= leftScore;
                 
-                // ★ 핵심 교정: Z축은 음수(-)가 카메라 방향(앞)입니다. 
-                // 우측을 볼 때(isFacingRight) 오른쪽 관절이 카메라와 가까워야 하므로 음수(-1)를 곱합니다!
-                const faceSign = isFacingRight ? -1 : 1;
+                // 우측면 관절 점수가 높다면 오른쪽 팔다리가 카메라에 더 가까운(앞에 있는) 상태입니다.
+                const isRightCloser = rightScore > leftScore;
 
-                // 정면 판별 (정면일 때는 양쪽 깊이를 동일하게 0으로 두어 뒤틀림 방지)
-                const isFrontArms = person.isBilateral ? person.isBilateral.arms : false;
-                const isFrontLegs = person.isBilateral ? person.isBilateral.legs : false;
+                // 🌟 마스터 키: 현재 캔버스 렌더러는 마이너스(-) Z값이 앞쪽(카메라 쪽)입니다!
+                const Z_DIR = -1; 
 
-                // 몸통(어깨~골반)의 길이를 기준으로 신체 비례(너비) 산출
+                // 🌟 핵심 보정 1: 몸통 길이 산출
                 const torsoLen = Math.hypot(pelvisMid.x - shoulderMid.x, pelvisMid.y - shoulderMid.y) || 100;
-                const refShoulderW = torsoLen * 0.65;
-                const refHipW = torsoLen * 0.45;
-
-                // 👇 수정: 엉터리 정면 판별(if문)을 삭제하고, 피타고라스 공식이 2D 너비에 맞춰 
-                // 자동으로 완벽한 Z축 깊이를 분배하도록 변경합니다.
                 
-                const dxS = rs.x - ls.x;
-                const dz2S = (refShoulderW * refShoulderW) - (dxS * dxS);
-                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
-                const zRightShoulder = (dzS / 2) * faceSign;
-                const zLeftShoulder = -(dzS / 2) * faceSign;
+                // 🌟 핵심 보정 2: 허리를 굽히거나 웅크려서 몸통 길이가 0에 가깝게 측정되더라도,
+                // 실제 2D 너비보다 최소 40(골반 30)의 Z축 두께를 강제로 추가하여 관절이 평면에 눌러붙는 현상 완벽 방지!
+                const actualShoulderW = Math.abs(rs.x - ls.x);
+                const refShoulderW = Math.max(torsoLen * 0.65, actualShoulderW + 40); 
+                
+                const actualHipW = Math.abs(rh.x - lh.x);
+                const refHipW = Math.max(torsoLen * 0.45, actualHipW + 30); 
 
-                const dxH = rh.x - lh.x;
-                const dz2H = (refHipW * refHipW) - (dxH * dxH);
+                // 어깨 깊이(Z) 산출 (항상 안전하게 작동)
+                const dz2S = (refShoulderW * refShoulderW) - (actualShoulderW * actualShoulderW);
+                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
+                // 카메라와 가까운 쪽에 튀어나오는 Z를, 먼 쪽에 들어가는 Z를 배정합니다.
+                const zRightShoulder = isRightCloser ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                const zLeftShoulder  = isRightCloser ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
+
+                // 골반 깊이(Z) 산출
+                const dz2H = (refHipW * refHipW) - (actualHipW * actualHipW);
                 const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
-                const zRightHip = (dzH / 2) * faceSign;
-                const zLeftHip = -(dzH / 2) * faceSign;
+                const zRightHip = isRightCloser ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                const zLeftHip  = isRightCloser ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
                 // 2. 운동학적 회전 계산 (순차적 적용)
                 rotatedPoints3D = kps.map((pt, idx) => {
@@ -2217,15 +2218,14 @@
                     let y = pt.y;
                     let z = 0;
 
-                    // 동적으로 계산된 인체 비례 Z 깊이 적용 (정확한 좌/우 매핑)
                     if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;        // 왼쪽 팔 전체
                     else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder; // 오른쪽 팔 전체
                     else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;     // 왼쪽 다리 전체
                     else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;    // 오른쪽 다리 전체
                     
-                    // 얼굴 부위도 음수(-)로 주어야 앞으로 튀어나옵니다. (기존 양수는 뒤통수로 파고듦)
-                    if (idx === 0) z = -25;
-                    else if (idx >= 1 && idx <= 4) z = -10;
+                    // 얼굴 부위 (코가 가장 입체적으로 앞으로 나오게 설정)
+                    if (idx === 0) z = 35 * Z_DIR;
+                    else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
 
                     let finalX = x, finalZ = z;
 
@@ -2254,8 +2254,8 @@
                     return {
                         rawX: finalX, // 보정 후 원본 스케일 좌표
                         rawY: y,
-                        x: (finalX - pelvisMid.x) + cx, // 캔버스 투영용 중앙 정렬 좌표
-                        y: (y - pelvisMid.y) + cy,
+                        x: (finalX - pelvisMid.x) + (canvas.width / 2), // 캔버스 투영용 중앙 정렬 좌표
+                        y: (y - pelvisMid.y) + (canvas.height / 2),
                         z: finalZ,
                         score: pt.score
                     };
