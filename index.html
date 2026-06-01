@@ -735,14 +735,14 @@
                         _calcUpperArm(personData, k, 12, 6, 8, 2); // 우측
                         _calcLowerArm(personData, k, 6, 8, 10, 3);
                         // 보이지 않는 좌측에 복사
-                        if (personData.angles[2]) personData.angles[6] = JSON.parse(JSON.stringify(personData.angles[2]));
-                        if (personData.angles[3]) personData.angles[7] = JSON.parse(JSON.stringify(personData.angles[3]));
+                        // if (personData.angles[2]) personData.angles[6] = JSON.parse(JSON.stringify(personData.angles[2]));
+                        // if (personData.angles[3]) personData.angles[7] = JSON.parse(JSON.stringify(personData.angles[3]));
                     } else {
                         _calcUpperArm(personData, k, 11, 5, 7, 6); // 좌측
                         _calcLowerArm(personData, k, 5, 7, 9, 7);
                         // 보이지 않는 우측에 복사
-                        if (personData.angles[6]) personData.angles[2] = JSON.parse(JSON.stringify(personData.angles[6]));
-                        if (personData.angles[7]) personData.angles[3] = JSON.parse(JSON.stringify(personData.angles[7]));
+                        // if (personData.angles[6]) personData.angles[2] = JSON.parse(JSON.stringify(personData.angles[6]));
+                        // if (personData.angles[7]) personData.angles[3] = JSON.parse(JSON.stringify(personData.angles[7]));
                     }
                 }
 
@@ -754,11 +754,11 @@
                     if (isFacingRight) {
                         _calcLeg(personData, k, 12, 14, 16, 5); // 우측
                         // 보이지 않는 좌측에 복사
-                        if (personData.angles[5]) personData.angles[9] = JSON.parse(JSON.stringify(personData.angles[5]));
+                        // if (personData.angles[5]) personData.angles[9] = JSON.parse(JSON.stringify(personData.angles[5]));
                     } else {
                         _calcLeg(personData, k, 11, 13, 15, 9); // 좌측
                         // 보이지 않는 우측에 복사
-                        if (personData.angles[9]) personData.angles[5] = JSON.parse(JSON.stringify(personData.angles[9]));
+                        // if (personData.angles[9]) personData.angles[5] = JSON.parse(JSON.stringify(personData.angles[9]));
                     }
                 }
             }
