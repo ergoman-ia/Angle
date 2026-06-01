@@ -2178,13 +2178,30 @@
                 const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
                 
-                // 👇 신규 추가: 작업자가 바라보는 방향(측면) 및 정면 여부 판단
+                // 👇 신규 보정: 인간공학적 인체 비례를 바탕으로 '골격의 진짜 3D 입체 두께(Z)'를 복원합니다.
                 const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
                 const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
                 const isFacingRight = rightScore >= leftScore;
-                
-                const isFrontArms = person.isBilateral ? person.isBilateral.arms : false;
-                const isFrontLegs = person.isBilateral ? person.isBilateral.legs : false;
+                const faceSign = isFacingRight ? 1 : -1;
+
+                // 몸통(어깨~골반)의 길이를 기준으로 신체 비례(너비) 산출
+                const torsoLen = Math.hypot(pelvisMid.x - shoulderMid.x, pelvisMid.y - shoulderMid.y) || 100;
+                const refShoulderW = torsoLen * 0.65; // 인체 비례상 어깨너비 (몸통 길이의 약 65%)
+                const refHipW = torsoLen * 0.45;      // 인체 비례상 골반너비 (몸통 길이의 약 45%)
+
+                // 2D 캔버스에서 좌/우 어깨가 얼마나 겹쳐있는지 파악하여 Z축 깊이 산출 (피타고라스 정리 적용)
+                const dxS = rs.x - ls.x;
+                const dz2S = (refShoulderW * refShoulderW) - (dxS * dxS);
+                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
+                const zRightShoulder = (dzS / 2) * faceSign;
+                const zLeftShoulder = -(dzS / 2) * faceSign;
+
+                // 2D 캔버스에서 좌/우 골반 깊이 산출
+                const dxH = rh.x - lh.x;
+                const dz2H = (refHipW * refHipW) - (dxH * dxH);
+                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
+                const zRightHip = (dzH / 2) * faceSign;
+                const zLeftHip = -(dzH / 2) * faceSign;
 
                 // 2. 운동학적 회전 계산 (순차적 적용)
                 rotatedPoints3D = kps.map((pt, idx) => {
@@ -2192,21 +2209,13 @@
                     let y = pt.y;
                     let z = 0;
 
-                    // 👇 수정: 방향(정면/측면)에 따라 깊이(Z축)를 동적으로 배정하여 좌/우 뒤바뀜 방지
-                    if (idx >= 5) {
-                        const isLeg = idx >= 11;
-                        const isFront = isLeg ? isFrontLegs : isFrontArms;
-                        
-                        if (isFront) {
-                            z = 0; // 정면일 때는 좌우 깊이 차이를 없애 평행하게 둡니다.
-                        } else {
-                            // 측면일 때: 카메라를 향한 쪽이 앞(+25), 반대쪽이 뒤(-25)가 되도록 자동 정렬
-                            if (idx % 2 !== 0) z = isFacingRight ? -25 : 25; // 홀수(왼쪽 관절)
-                            if (idx % 2 === 0) z = isFacingRight ? 25 : -25; // 짝수(오른쪽 관절)
-                        }
-                    }
+                    // 동적으로 계산된 인체 비례 Z 깊이 적용 (관절이 붙어보이는 현상 완벽 해결!)
+                    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;        // 왼쪽 팔 전체
+                    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder; // 오른쪽 팔 전체
+                    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;     // 왼쪽 다리 전체
+                    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;    // 오른쪽 다리 전체
                     
-                    // 목/얼굴(0~4)은 코(0)가 가장 튀어나오게 설정
+                    // 목/얼굴(0~4)
                     if (idx === 0) z = 35;
                     else if (idx >= 1 && idx <= 4) z = 10;
 
