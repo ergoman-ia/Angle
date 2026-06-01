@@ -2196,23 +2196,20 @@
                 const refShoulderW = torsoLen * 0.65;
                 const refHipW = torsoLen * 0.45;
 
-                let zRightShoulder = 0, zLeftShoulder = 0;
-                if (!isFrontArms) { // 단측(옆모습)일 때만 입체감 부여
-                    const dxS = rs.x - ls.x;
-                    const dz2S = (refShoulderW * refShoulderW) - (dxS * dxS);
-                    const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
-                    zRightShoulder = (dzS / 2) * faceSign;
-                    zLeftShoulder = -(dzS / 2) * faceSign;
-                }
+                // 👇 수정: 엉터리 정면 판별(if문)을 삭제하고, 피타고라스 공식이 2D 너비에 맞춰 
+                // 자동으로 완벽한 Z축 깊이를 분배하도록 변경합니다.
+                
+                const dxS = rs.x - ls.x;
+                const dz2S = (refShoulderW * refShoulderW) - (dxS * dxS);
+                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
+                const zRightShoulder = (dzS / 2) * faceSign;
+                const zLeftShoulder = -(dzS / 2) * faceSign;
 
-                let zRightHip = 0, zLeftHip = 0;
-                if (!isFrontLegs) { // 단측(옆모습)일 때만 입체감 부여
-                    const dxH = rh.x - lh.x;
-                    const dz2H = (refHipW * refHipW) - (dxH * dxH);
-                    const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
-                    zRightHip = (dzH / 2) * faceSign;
-                    zLeftHip = -(dzH / 2) * faceSign;
-                }
+                const dxH = rh.x - lh.x;
+                const dz2H = (refHipW * refHipW) - (dxH * dxH);
+                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
+                const zRightHip = (dzH / 2) * faceSign;
+                const zLeftHip = -(dzH / 2) * faceSign;
 
                 // 2. 운동학적 회전 계산 (순차적 적용)
                 rotatedPoints3D = kps.map((pt, idx) => {
