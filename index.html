@@ -2114,15 +2114,34 @@
                 const trunkRad = (modalTrunkYaw * Math.PI) / 180;
                 const neckRad = (modalNeckYaw * Math.PI) / 180;
 
+                // 👇 신규 추가: 작업자가 바라보는 방향(측면) 및 정면 여부 판단
+                const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
+                const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
+                const isFacingRight = rightScore >= leftScore;
+                
+                const isFrontArms = person.isBilateral ? person.isBilateral.arms : false;
+                const isFrontLegs = person.isBilateral ? person.isBilateral.legs : false;
+
                 // 2. 운동학적 회전 계산 (순차적 적용)
                 rotatedPoints3D = kps.map((pt, idx) => {
                     let x = pt.x;
                     let y = pt.y;
                     let z = 0;
 
-                    // 기본 깊이(Z축) 부여: 좌측(홀수)은 앞쪽, 우측(짝수)은 뒤쪽
-                    if (idx % 2 !== 0 && idx >= 5) z = 25;
-                    if (idx % 2 === 0 && idx >= 6) z = -25;
+                    // 👇 수정: 방향(정면/측면)에 따라 깊이(Z축)를 동적으로 배정하여 좌/우 뒤바뀜 방지
+                    if (idx >= 5) {
+                        const isLeg = idx >= 11;
+                        const isFront = isLeg ? isFrontLegs : isFrontArms;
+                        
+                        if (isFront) {
+                            z = 0; // 정면일 때는 좌우 깊이 차이를 없애 평행하게 둡니다.
+                        } else {
+                            // 측면일 때: 카메라를 향한 쪽이 앞(+25), 반대쪽이 뒤(-25)가 되도록 자동 정렬
+                            if (idx % 2 !== 0) z = isFacingRight ? -25 : 25; // 홀수(왼쪽 관절)
+                            if (idx % 2 === 0) z = isFacingRight ? 25 : -25; // 짝수(오른쪽 관절)
+                        }
+                    }
+                    
                     // 목/얼굴(0~4)은 코(0)가 가장 튀어나오게 설정
                     if (idx === 0) z = 35;
                     else if (idx >= 1 && idx <= 4) z = 10;
