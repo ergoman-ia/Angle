@@ -2179,56 +2179,60 @@
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
                 
                 // ─── [3D 입체감(Z축) 및 방향 완벽 복원 로직] ───
-                // 🌟 수정: AI의 엉터리 점수(score) 판별을 버리고, 
-                // 선생님께서 2D 패널에서 직접 확인/수정하신 '실제 데이터 존재 여부'를 절대 기준으로 삼습니다!
-                
-                const hasRightArm = !!person.angles[2] || !!person.angles[3]; // 우측 팔 데이터 유무
-                const hasLeftArm  = !!person.angles[6] || !!person.angles[7]; // 좌측 팔 데이터 유무
-                const hasRightLeg = !!person.angles[5]; // 우측 다리 데이터 유무
-                const hasLeftLeg  = !!person.angles[9]; // 좌측 다리 데이터 유무
+                // 🌟 핵심 교정 1: AI의 점수 대신, 사용자가 2D 패널에 남겨둔 '다리(좌/우)' 데이터를 최우선 기준으로 삼습니다.
+                const rightLeg = !!person.angles[5];
+                const leftLeg = !!person.angles[9];
+                const rightArm = !!person.angles[2] || !!person.angles[3];
+                const leftArm = !!person.angles[6] || !!person.angles[7];
 
-                let isRightCloser = false;
-
-                // 2D 패널에 우측 부위만 활성화되어 있다면 무조건 우측이 앞(카메라 쪽), 좌측만 있다면 좌측이 앞입니다!
-                if (hasRightArm && !hasLeftArm) {
-                    isRightCloser = true;
-                } else if (hasLeftArm && !hasRightArm) {
-                    isRightCloser = false;
-                } else if (hasRightLeg && !hasLeftLeg) {
-                    isRightCloser = true;
-                } else if (hasLeftLeg && !hasRightLeg) {
-                    isRightCloser = false;
+                let isRightCloser = true;
+                if (leftLeg && !rightLeg) {
+                    isRightCloser = false; // 좌측 다리만 2D 패널에 있으면 무조건 좌측이 앞
+                } else if (rightLeg && !leftLeg) {
+                    isRightCloser = true;  // 우측 다리만 있으면 무조건 우측이 앞
+                } else if (leftArm && !rightArm) {
+                    isRightCloser = false; // 다리가 없고 좌측 팔만 있으면 좌측이 앞
+                } else if (rightArm && !leftArm) {
+                    isRightCloser = true;  // 우측 팔만 있으면 우측이 앞
                 } else {
-                    // 양측이 모두 감지된 완벽한 정면이거나 양측 모두 데이터가 없는 경우에만 AI 원본 점수로 보조 판단
-                    const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
-                    const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
-                    isRightCloser = rightScore > leftScore;
+                    // 양측 모두 있거나 없는 정면의 경우, AI 원본 점수로 보조 판단
+                    const lScore = (kps[5].score + kps[7].score + kps[11].score);
+                    const rScore = (kps[6].score + kps[8].score + kps[12].score);
+                    isRightCloser = rScore >= lScore;
                 }
 
-                // 🌟 마스터 키: 현재 캔버스 렌더러는 마이너스(-) Z값이 앞쪽(카메라 쪽)입니다!
+                // 🌟 마스터 키: 마이너스(-) Z값이 카메라 앞쪽으로 튀어나옵니다.
                 const Z_DIR = -1; 
 
-                // 🌟 핵심 보정 1: 몸통 길이 산출
-                const torsoLen = Math.hypot(pelvisMid.x - shoulderMid.x, pelvisMid.y - shoulderMid.y) || 100;
-                
-                // 🌟 핵심 보정 2: 허리를 굽히거나 웅크려서 몸통 길이가 0에 가깝게 측정되더라도,
-                // 실제 2D 너비보다 최소 40(골반 30)의 Z축 두께를 강제로 추가하여 관절이 평면에 눌러붙는 현상 완벽 방지!
-                const actualShoulderW = Math.abs(rs.x - ls.x);
-                const refShoulderW = Math.max(torsoLen * 0.65, actualShoulderW + 40); 
-                
-                const actualHipW = Math.abs(rh.x - lh.x);
-                const refHipW = Math.max(torsoLen * 0.45, actualHipW + 30); 
+                // 🌟 핵심 교정 2: 정면 자세일 때 억지로 비틀리는 현상 완벽 방지 (인체 비례 스케일 동적 적용)
+                let maxBone = 50; // 기준이 될 가장 긴 뼈의 길이
+                const bones = [[11,13], [12,14], [5,11], [6,12]]; // 허벅지, 몸통
+                bones.forEach(b => {
+                    const p1 = kps[b[0]], p2 = kps[b[1]];
+                    if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
+                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                        if (dist > maxBone) maxBone = dist;
+                    }
+                });
 
-                // 어깨 깊이(Z) 산출 (항상 안전하게 작동)
-                const dz2S = (refShoulderW * refShoulderW) - (actualShoulderW * actualShoulderW);
+                // 가장 긴 뼈를 기준으로 해당 작업자의 100% 어깨/골반 너비 산출
+                const idealShoulderW = Math.max(maxBone * 0.8, 50);
+                const idealHipW = Math.max(maxBone * 0.6, 40);
+
+                // 어깨 깊이(Z) 산출 (정면이면 dzS가 0이 되어 비틀림 발생 안 함!)
+                const actualShoulderW = Math.abs(rs.x - ls.x);
+                const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
                 const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
-                // 카메라와 가까운 쪽에 튀어나오는 Z를, 먼 쪽에 들어가는 Z를 배정합니다.
+                
+                // 골반 깊이(Z) 산출
+                const actualHipW = Math.abs(rh.x - lh.x);
+                const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
+                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
+
+                // 앞/뒤 Z값 최종 배정
                 const zRightShoulder = isRightCloser ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
                 const zLeftShoulder  = isRightCloser ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
-                // 골반 깊이(Z) 산출
-                const dz2H = (refHipW * refHipW) - (actualHipW * actualHipW);
-                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
                 const zRightHip = isRightCloser ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
                 const zLeftHip  = isRightCloser ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
