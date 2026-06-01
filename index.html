@@ -2182,7 +2182,6 @@
                 const cx = canvas.width / 2;
                 const cy = canvas.height / 2;
 
-                // 1. 회전의 기준축 설정 (골반 중심, 어깨 중심)
                 const lh = kps[11], rh = kps[12], ls = kps[5], rs = kps[6];
                 if (!lh || !rh || !ls || !rs) return;
 
@@ -2197,7 +2196,7 @@
                 const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
 
-                // 🌟 [수정됨] 회전과 무관하게 2D 패널 상태만을 기준으로 고정된(Baseline) 방향성 확립
+                // 🌟 [수정 1] 2D 패널 상태를 기준으로 고정된(Baseline) 방향성 확립
                 const rightLeg = !!person.angles[5];
                 const leftLeg = !!person.angles[9];
                 const rightArm = !!person.angles[2] || !!person.angles[3];
@@ -2209,13 +2208,14 @@
                 else if (leftArm && !rightArm) isRightCloserBaseline = false;
                 else if (rightArm && !leftArm) isRightCloserBaseline = true;
                 else {
-                    // 패널 정보가 부족할 때만 초기 위치 기준으로 판별 (이후 회전해도 고정됨)
-                    isRightCloserBaseline = rh.x < lh.x; 
+                    // 🌟 [버그 수정 완료!] 양측이 모두 있을 경우, AI가 감지한 신뢰도(Score)로 앞뒤를 정확히 판별합니다.
+                    const lScore = (kps[5].score + kps[7].score + kps[11].score);
+                    const rScore = (kps[6].score + kps[8].score + kps[12].score);
+                    isRightCloserBaseline = rScore >= lScore; 
                 }
 
                 const Z_DIR = -1;
 
-                // 인체 비례 스케일 동적 적용 (비틀림 방지)
                 let maxBone = 50;
                 const bones = [[11, 13], [12, 14], [5, 11], [6, 12]];
                 bones.forEach(b => {
@@ -2237,14 +2237,12 @@
                 const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
                 const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
 
-                // 베이스라인(isRightCloserBaseline)을 기준으로 Z값 확정
                 const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
                 const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
                 const zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
                 const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
-                // 2. 운동학적 회전 계산
                 rotatedPoints3D = kps.map((pt, idx) => {
                     let x = pt.x;
                     let y = pt.y;
@@ -2274,7 +2272,6 @@
                         finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
                     }
 
-                    // 카메라 시점 회전
                     let rx = finalX - pelvisMid.x;
                     let rz = finalZ;
                     finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
@@ -2285,17 +2282,16 @@
                         rawY: y,
                         x: (finalX - pelvisMid.x) + (canvas.width / 2),
                         y: (y - pelvisMid.y) + (canvas.height / 2),
-                        z: finalZ, // 회전이 반영된 실제 깊이
+                        z: finalZ, 
                         score: pt.score
                     };
                 });
 
-                // 🌟 [수정됨] Z-Sorting 렌더링: 뒤에 있는 뼈(배경)를 먼저 그리고, 앞에 있는 뼈(전경)를 나중에 덮어 그립니다.
                 drawSkeletonLayers(rotatedPoints3D, ctx, "background");
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
             }
 
-            // 💡 [신규 헬퍼 함수] 레이어 분리 드로잉
+            // 💡 [수정 2] 레이어 분리 드로잉 (컬러 코딩 적용: 좌측-녹색, 우측-파란색)
             function drawSkeletonLayers(points, ctx, layerType) {
                 const connections = [
                     [0, 5], [0, 6], [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
@@ -2306,7 +2302,6 @@
                 connections.forEach(([i, j]) => {
                     const p1 = points[i], p2 = points[j];
                     if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
-                        // 선의 중간 지점 깊이를 계산하여 소속 레이어 판별 (Z가 클수록 뒤쪽)
                         const midZ = (p1.z + p2.z) / 2;
                         const isBackgroundLine = midZ > 0; 
                         
@@ -2314,8 +2309,21 @@
                             (layerType === "foreground" && !isBackgroundLine)) {
                             
                             ctx.beginPath();
-                            // 뒤쪽(배경) 선은 어두운 파란색, 앞쪽(전경) 선은 밝은 하늘색
-                            ctx.strokeStyle = isBackgroundLine ? '#0055ff' : '#00e5ff';
+                            
+                            // 🌟 좌(녹색), 우(파란색), 중앙(회색) 색상 분리
+                            let strokeColor = '';
+                            const isLeftLine = (i % 2 !== 0 && j % 2 !== 0 && i >= 5 && j >= 5);
+                            const isRightLine = (i % 2 === 0 && j % 2 === 0 && i >= 6 && j >= 6);
+                            
+                            if (isLeftLine) {
+                                strokeColor = isBackgroundLine ? '#127356' : '#20c997'; // 좌측: 다크그린 / 라이트그린
+                            } else if (isRightLine) {
+                                strokeColor = isBackgroundLine ? '#1864ab' : '#4dabf7'; // 우측: 다크블루 / 라이트블루
+                            } else {
+                                strokeColor = isBackgroundLine ? '#6c757d' : '#ced4da'; // 중앙 몸통: 회색
+                            }
+
+                            ctx.strokeStyle = strokeColor;
                             ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
                             ctx.stroke();
                         }
@@ -2332,13 +2340,22 @@
                             const radius = Math.max(3, 7 - (pt.z * 0.05));
                             ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
                             
-                            if (isBackgroundPt) {
-                                // 뒤에 있는 관절은 어둡게 처리하여 원근감 강조
-                                ctx.fillStyle = idx <= 4 ? '#b8a670' : '#cccccc';
+                            // 🌟 관절점 색상도 좌/우 동일하게 통일
+                            let fillColor = '';
+                            if (idx <= 4) {
+                                fillColor = isBackgroundPt ? '#b8a670' : '#ffeaa7'; // 머리: 노란색
+                            } else if (idx % 2 !== 0) {
+                                fillColor = isBackgroundPt ? '#127356' : '#20c997'; // 좌측
                             } else {
-                                ctx.fillStyle = idx <= 4 ? '#ffeaa7' : '#ffffff';
+                                fillColor = isBackgroundPt ? '#1864ab' : '#4dabf7'; // 우측
                             }
+                            
+                            ctx.fillStyle = fillColor;
                             ctx.fill();
+                            // 원근감 강조를 위해 뒤쪽 뼈대 외곽선은 어둡게 처리
+                            ctx.strokeStyle = isBackgroundPt ? '#222' : '#fff';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
                         }
                     }
                 });
