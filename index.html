@@ -731,9 +731,10 @@
                     rawPose: rawPose,
                     angles: new Array(10).fill(null),
                     manualAngles: [],
-                    isBilateral: { arms: false, legs: false },  // ← 양측 감지 상태 저장
-                    neckYaw: 0,   // 👇 신규 추가: 목 비틀림 각도 방 생성
-                    trunkYaw: 0   // 👇 신규 추가: 몸통 비틀림 각도 방 생성
+                    isBilateral: { arms: false, legs: false },
+                    neckYaw: 0,   
+                    trunkYaw: 0,
+                    camYaw: 0     // 👇 신규 추가: 카메라 시점 비틀림 값 저장소
                 };
                 if (rawPose) autoCalculateAngles(data);
                 return data;
@@ -2055,10 +2056,10 @@
                     // 👇 수정: 무조건 0으로 초기화되던 슬라이더를 우측 패널(기존 분석 결과) 데이터로 연동합니다.
                     const person = personDataList[activePersonIndex];
 
-                    // 1. 전체 시점 회전(카메라)은 항상 0도 정면 뷰에서 시작합니다.
-                    document.getElementById('camYawSlider').value = 0;
-                    document.getElementById('camYawValue').innerText = "0°";
-                    modalCamYaw = 0;
+                    // 1. 전체 시점 회전(카메라) 값 연속 연동
+                    modalCamYaw = person.camYaw || 0;
+                    document.getElementById('camYawSlider').value = modalCamYaw;
+                    document.getElementById('camYawValue').innerText = modalCamYaw + "°";
 
                     // 2. 허리(몸통) 비틀림 값 연속 연동
                     modalTrunkYaw = person.trunkYaw || 0;
@@ -2110,10 +2111,15 @@
                 const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
                 const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
 
-                const camRad = (modalCamYaw * Math.PI) / 180;
-                const trunkRad = (modalTrunkYaw * Math.PI) / 180;
-                const neckRad = (modalNeckYaw * Math.PI) / 180;
+                // 👇 수정: 절대값이 아닌 "이전에 보정한 값 대비 얼마나 더 움직였는가(변화량, Delta)"만 계산
+                const deltaCamYaw = modalCamYaw - (person.camYaw || 0);
+                const deltaTrunkYaw = modalTrunkYaw - (person.trunkYaw || 0);
+                const deltaNeckYaw = modalNeckYaw - (person.neckYaw || 0);
 
+                const camRad = (deltaCamYaw * Math.PI) / 180;
+                const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
+                const neckRad = (deltaNeckYaw * Math.PI) / 180;
+                
                 // 👇 신규 추가: 작업자가 바라보는 방향(측면) 및 정면 여부 판단
                 const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
                 const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
@@ -2231,6 +2237,7 @@
 
                 person.neckYaw = modalNeckYaw;
                 person.trunkYaw = modalTrunkYaw;
+                person.camYaw = modalCamYaw; // 👇 신규 추가: 적용된 카메라 회전값 저장
 
                 // ★ 이 함수가 호출되면서 덮어써진 X,Y 좌표를 바탕으로 굽힘(Flexion) 각도가 새롭게 계산됨!
                 autoCalculateAngles(person);
