@@ -886,6 +886,8 @@
                 const { arms, legs } = activeData.isBilateral;
                 if ((i >= 2 && i <= 4) && !arms) return { ...base, label: base.label.replace('(우)', '') };
                 if (i === 5 && !legs) return { ...base, label: base.label.replace('(우)', '') };
+                if ((i >= 6 && i <= 8) && !arms) return { ...base, label: base.label.replace('(좌)', '') };
+                if (i === 9 && !legs) return { ...base, label: base.label.replace('(좌)', '') };
                 return base;
             }
 
@@ -917,6 +919,14 @@
             });
 
             canvas.addEventListener('mousedown', function (e) {
+                if (e.button === 2) {
+                    if (viewZoom > 1.0) {
+                        isPanning = true;
+                        panStart = { x: e.clientX, y: e.clientY };
+                    }
+                    return;
+                }
+
                 const { realX, realY, canvasX, canvasY } = getMousePos(e);
 
                 if (isAddingMode) {
@@ -989,6 +999,10 @@
                     let data = (idx < BODY_PARTS.length) ? activeData.angles[idx] : activeData.manualAngles[idx - BODY_PARTS.length];
                     if (!data) continue;
                     for (let j = 0; j < 3; j++) {
+
+                        // ✅ 목(0)의 points[2]는 허리 연장선 기준점(pRef)이므로 드래그 차단
+                        if (idx === 0 && j === 2) continue;
+
                         if (Math.hypot(data.points[j].x - realX, data.points[j].y - realY) < 15 / (imgScale * viewZoom)) {
                             draggingPoint = { globalIndex: idx, pointIndex: j };
                             selectedAngleIndex = idx; drawAll(); return;
@@ -1021,7 +1035,7 @@
                 if (selectedAngleIndex !== -1) { selectedAngleIndex = -1; drawAll(); return; }
 
                 // 수동 추가 (Extra)
-                if (!correctionTargetIndex) {
+                if (correctionTargetIndex === -1) {
                     if (!extraTempPoints) extraTempPoints = [];
                     extraTempPoints.push({ x: realX, y: realY });
                     if (extraTempPoints.length === 3) {
@@ -1035,6 +1049,18 @@
 
             // [기존 코드에서 이 부분을 찾아 교체해주세요]
             canvas.addEventListener('mousemove', function (e) {
+                if (isPanning) {
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    viewPanX += (e.clientX - panStart.x) * scaleX;
+                    viewPanY += (e.clientY - panStart.y) * scaleY;
+                    panStart = { x: e.clientX, y: e.clientY };
+                    canvas.style.cursor = 'move';
+                    requestDraw();
+                    return; // 패닝 중엔 드래그 로직 실행 불필요
+                }
+
                 const { realX, realY, canvasX, canvasY } = getMousePos(e);
 
                 if (isAddingMode && selectionStart) {
@@ -1118,6 +1144,11 @@
             });
 
             canvas.addEventListener('mouseup', function (e) {
+                if (e.button === 2) {
+                    isPanning = false;
+                    return;
+                }
+
                 if (isAddingMode && selectionStart) {
                     if (selectionRect && selectionRect.w > 20 && selectionRect.h > 20) analyzeRegion(selectionRect);
                     isAddingMode = false; selectionStart = null; selectionRect = null;
@@ -1149,31 +1180,6 @@
 
                 requestDraw();
             }, { passive: false });
-
-            // ── 우클릭 드래그: 패닝 ───────────────────────────────────────
-            canvas.addEventListener('mousedown', function (e) {
-                if (e.button === 2 && viewZoom > 1.0) {
-                    isPanning = true;
-                    panStart = { x: e.clientX, y: e.clientY };
-                }
-            }, true); // capture phase로 기존 mousedown보다 먼저 실행
-
-            canvas.addEventListener('mousemove', function (e) {
-                if (isPanning) {
-                    const rect = canvas.getBoundingClientRect();
-                    const scaleX = canvas.width / rect.width;
-                    const scaleY = canvas.height / rect.height;
-                    viewPanX += (e.clientX - panStart.x) * scaleX;
-                    viewPanY += (e.clientY - panStart.y) * scaleY;
-                    panStart = { x: e.clientX, y: e.clientY };
-                    canvas.style.cursor = 'move';
-                    requestDraw();
-                }
-            }, true);
-
-            canvas.addEventListener('mouseup', function (e) {
-                if (e.button === 2) { isPanning = false; }
-            }, true);
 
             // 우클릭 컨텍스트 메뉴 차단
             canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
@@ -2211,7 +2217,7 @@
                     // 🌟 [버그 수정 완료!] 양측이 모두 있을 경우, AI가 감지한 신뢰도(Score)로 앞뒤를 정확히 판별합니다.
                     const lScore = (kps[5].score + kps[7].score + kps[11].score);
                     const rScore = (kps[6].score + kps[8].score + kps[12].score);
-                    isRightCloserBaseline = rScore >= lScore; 
+                    isRightCloserBaseline = rScore >= lScore;
                 }
 
                 const Z_DIR = -1;
@@ -2282,7 +2288,7 @@
                         rawY: y,
                         x: (finalX - pelvisMid.x) + (canvas.width / 2),
                         y: (y - pelvisMid.y) + (canvas.height / 2),
-                        z: finalZ, 
+                        z: finalZ,
                         score: pt.score
                     };
                 });
@@ -2303,18 +2309,18 @@
                     const p1 = points[i], p2 = points[j];
                     if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
                         const midZ = (p1.z + p2.z) / 2;
-                        const isBackgroundLine = midZ > 0; 
-                        
-                        if ((layerType === "background" && isBackgroundLine) || 
+                        const isBackgroundLine = midZ > 0;
+
+                        if ((layerType === "background" && isBackgroundLine) ||
                             (layerType === "foreground" && !isBackgroundLine)) {
-                            
+
                             ctx.beginPath();
-                            
+
                             // 🌟 좌(녹색), 우(파란색), 중앙(회색) 색상 분리
                             let strokeColor = '';
                             const isLeftLine = (i % 2 !== 0 && j % 2 !== 0 && i >= 5 && j >= 5);
                             const isRightLine = (i % 2 === 0 && j % 2 === 0 && i >= 6 && j >= 6);
-                            
+
                             if (isLeftLine) {
                                 strokeColor = isBackgroundLine ? '#127356' : '#20c997'; // 좌측: 다크그린 / 라이트그린
                             } else if (isRightLine) {
@@ -2333,13 +2339,13 @@
                 points.forEach((pt, idx) => {
                     if (pt.score > 0.1) {
                         const isBackgroundPt = pt.z > 0;
-                        if ((layerType === "background" && isBackgroundPt) || 
+                        if ((layerType === "background" && isBackgroundPt) ||
                             (layerType === "foreground" && !isBackgroundPt)) {
-                            
+
                             ctx.beginPath();
                             const radius = Math.max(3, 7 - (pt.z * 0.05));
                             ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
-                            
+
                             // 🌟 관절점 색상도 좌/우 동일하게 통일
                             let fillColor = '';
                             if (idx <= 4) {
@@ -2349,7 +2355,7 @@
                             } else {
                                 fillColor = isBackgroundPt ? '#1864ab' : '#4dabf7'; // 우측
                             }
-                            
+
                             ctx.fillStyle = fillColor;
                             ctx.fill();
                             // 원근감 강조를 위해 뒤쪽 뼈대 외곽선은 어둡게 처리
@@ -2361,8 +2367,7 @@
                 });
             }
 
-            // ─── [신규 추가] 3D 모달 내 좌/우 신체 부위 데이터 강제 교체(Swap) 기능 ───
-            document.getElementById('btnSwapLeftRight3D').addEventListener('click', function() {
+            document.getElementById('btnSwapLeftRight3D').addEventListener('click', function () {
                 const person = personDataList[activePersonIndex];
                 if (!person || !person.rawPose || !person.rawPose.keypoints) {
                     alert("교체할 신체 데이터가 없습니다.");
@@ -2371,45 +2376,31 @@
 
                 const kps = person.rawPose.keypoints;
 
-                // 1. MoveNet 표준 키포인트의 좌/우 인덱스 쌍 매핑
+                // Step 1. rawPose keypoints 좌우 교체
                 const kpPairs = [
-                    [1, 2],   // 눈 (좌/우)
-                    [3, 4],   // 귀 (좌/우)
-                    [5, 6],   // 어깨 (좌/우)
-                    [7, 8],   // 팔꿈치 (좌/우)
-                    [9, 10],  // 손목 (좌/우)
-                    [11, 12], // 골반 (좌/우)
-                    [13, 14], // 무릎 (좌/우)
-                    [15, 16]  // 발목 (좌/우)
+                    [1, 2], [3, 4], [5, 6], [7, 8],
+                    [9, 10], [11, 12], [13, 14], [15, 16]
                 ];
 
-                // 3D 뼈대 원본 좌표(Keypoints) 좌우 교환
                 kpPairs.forEach(([lIdx, rIdx]) => {
                     if (kps[lIdx] && kps[rIdx]) {
                         const tempX = kps[lIdx].x;
                         const tempY = kps[lIdx].y;
                         const tempScore = kps[lIdx].score;
-
                         kps[lIdx].x = kps[rIdx].x;
                         kps[lIdx].y = kps[rIdx].y;
                         kps[lIdx].score = kps[rIdx].score;
-
                         kps[rIdx].x = tempX;
                         kps[rIdx].y = tempY;
                         kps[rIdx].score = tempScore;
                     }
                 });
 
-                // 2. 우측 패널(right-panel) 및 2D 연동 데이터(angles) 좌우 교환
-                // 매핑 정보 -> 2(윗팔우)↔6(윗팔좌), 3(아랫팔우)↔7(아랫팔좌), 4(손목우)↔8(손목좌), 5(다리우)↔9(다리좌)
+                // Step 2. angles 배열 좌우 교체
                 if (person.angles) {
                     const anglePairs = [
-                        [2, 6], // 윗팔 (우 ↔ 좌)
-                        [3, 7], // 아랫팔 (우 ↔ 좌)
-                        [4, 8], // 손목 (우 ↔ 좌)
-                        [5, 9]  // 다리 (우 ↔ 좌)
+                        [2, 6], [3, 7], [4, 8], [5, 9]
                     ];
-
                     anglePairs.forEach(([rAng, lAng]) => {
                         const temp = person.angles[rAng];
                         person.angles[rAng] = person.angles[lAng];
@@ -2417,16 +2408,20 @@
                     });
                 }
 
-                // 3. 머리(0)와 몸통(1)의 참조선 재정렬을 위해 방향 토글 보조
-                // (좌우가 바뀌었으므로 바라보는 주 방향성을 리셋하여 정렬 유도)
-                if (window.syncAll2DTo3D) {
-                    window.syncAll2DTo3D(person);
-                }
+                // ✅ 수정 2: syncAll2DTo3D 호출 제거
+                //    (kps를 이미 교체했으므로 angles 기반으로 재덮어쓰면 교체 효과가 소멸됨)
 
-                // 4. 3D 캔버스 즉시 재렌더링
+                // ✅ 수정 5: 교체 후 isBilateral 재판별
+                const hasRightArm = !!person.angles[2] || !!person.angles[3];
+                const hasLeftArm = !!person.angles[6] || !!person.angles[7];
+                const hasRightLeg = !!person.angles[5];
+                const hasLeftLeg = !!person.angles[9];
+                person.isBilateral = {
+                    arms: hasRightArm && hasLeftArm,
+                    legs: hasRightLeg && hasLeftLeg
+                };
+
                 render3DModal();
-                
-                // 가벼운 알림 효과 (선택 사항)
                 console.log("신체 좌우 데이터가 성공적으로 교체되었습니다.");
             });
 
@@ -2447,7 +2442,7 @@
                 person.trunkYaw = modalTrunkYaw;
                 person.camYaw = modalCamYaw; // 👇 신규 추가: 적용된 카메라 회전값 저장
 
-                // ★ 이 함수가 호출되면서 덮어써진 X,Y 좌표를 바탕으로 굽힘(Flexion) 각도가 새롭게 계산됨!
+                if (window.syncAll2DTo3D) window.syncAll2DTo3D(person);
                 autoCalculateAngles(person);
 
                 close3DModal();
