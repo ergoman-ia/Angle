@@ -448,6 +448,10 @@
         <div class="modal-footer">
             <button class="save" style="background-color: #6c757d; width: auto; padding: 10px 20px;"
                 onclick="close3DModal()">취소</button>
+            <button id="btnSwapLeftRight3D" class="btn btn-warning"
+                style="padding: 8px 16px; background-color: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                🔄 좌/우 바꾸기
+            </button>
             <button class="save" style="background-color: #6f42c1; width: auto; padding: 10px 20px;"
                 onclick="apply3DCorrection()">보정값 각도 반영</button>
         </div>
@@ -732,7 +736,7 @@
                     angles: new Array(10).fill(null),
                     manualAngles: [],
                     isBilateral: { arms: false, legs: false },
-                    neckYaw: 0,   
+                    neckYaw: 0,
                     trunkYaw: 0,
                     camYaw: 0     // 👇 신규 추가: 카메라 시점 비틀림 값 저장소
                 };
@@ -2040,10 +2044,10 @@
             });
 
             // 👇 수정됨: 3D 모달을 열기 직전, 2D 패널의 데이터로 3D 뼈대를 완벽히 복원하는 함수
-            window.syncAll2DTo3D = function(person) {
+            window.syncAll2DTo3D = function (person) {
                 if (!person || !person.rawPose || !person.angles) return;
                 const kps = person.rawPose.keypoints;
-                
+
                 const updateKp = (idx, pt) => {
                     if (idx >= 0 && idx < kps.length && pt) {
                         kps[idx].x = pt.x;
@@ -2075,11 +2079,11 @@
                     if (!data || !data.points) return;
                     const pts = data.points;
 
-                    if (idx === 0) { 
+                    if (idx === 0) {
                         const headIdx = kps[0].score > 0.1 ? 0 : (isFacingRight ? 4 : 3);
                         updateKp(headIdx, pts[0]);
                         if (!person.isBilateral.arms) updateKp(isFacingRight ? 6 : 5, pts[1]);
-                    } else if (idx === 1) { 
+                    } else if (idx === 1) {
                         if (!person.isBilateral.legs) updateKp(isFacingRight ? 12 : 11, pts[1]);
                         if (!person.isBilateral.arms) updateKp(isFacingRight ? 6 : 5, pts[2]);
                     } else {
@@ -2102,7 +2106,7 @@
 
                     if (leftValid && !rightValid) {
                         // 좌측만 전문가가 입력했다면, 우측을 좌측 뒤로 숨김 (3D에서 꼬임 방지)
-                        ptR.x = ptL.x; ptR.y = ptL.y; ptR.score = 0.15; 
+                        ptR.x = ptL.x; ptR.y = ptL.y; ptR.score = 0.15;
                     } else if (!leftValid && rightValid) {
                         // 우측만 전문가가 입력했다면, 좌측을 우측 뒤로 숨김
                         ptL.x = ptR.x; ptL.y = ptR.y; ptL.score = 0.15;
@@ -2115,13 +2119,13 @@
             let rotatedPoints3D = []; // 보정 후 좌표 임시 저장 배열
 
             const open3DModalBtn = document.getElementById('open3DModalBtn');
-            if(open3DModalBtn) {
-                open3DModalBtn.addEventListener('click', function() {
+            if (open3DModalBtn) {
+                open3DModalBtn.addEventListener('click', function () {
                     if (activePersonIndex === -1 || !personDataList[activePersonIndex].rawPose) {
                         alert("보정할 작업자를 먼저 선택하거나 분석을 완료해주세요.");
                         return;
                     }
-                    
+
                     const person = personDataList[activePersonIndex];
 
                     // 👇 신규 추가: 3D 모달을 띄우기 직전에 2D(패널) 데이터를 가져와 AI가 놓친 3D 빈칸을 완벽히 채웁니다.
@@ -2193,7 +2197,7 @@
                 const camRad = (deltaCamYaw * Math.PI) / 180;
                 const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
-                
+
                 // ─── [3D 입체감(Z축) 및 방향 완벽 복원 로직] ───
                 // 🌟 핵심 교정 1: AI의 점수 대신, 사용자가 2D 패널에 남겨둔 '다리(좌/우)' 데이터를 최우선 기준으로 삼습니다.
                 const rightLeg = !!person.angles[5];
@@ -2218,11 +2222,11 @@
                 }
 
                 // 🌟 마스터 키: 마이너스(-) Z값이 카메라 앞쪽으로 튀어나옵니다.
-                const Z_DIR = -1; 
+                const Z_DIR = -1;
 
                 // 🌟 핵심 교정 2: 정면 자세일 때 억지로 비틀리는 현상 완벽 방지 (인체 비례 스케일 동적 적용)
                 let maxBone = 50; // 기준이 될 가장 긴 뼈의 길이
-                const bones = [[11,13], [12,14], [5,11], [6,12]]; // 허벅지, 몸통
+                const bones = [[11, 13], [12, 14], [5, 11], [6, 12]]; // 허벅지, 몸통
                 bones.forEach(b => {
                     const p1 = kps[b[0]], p2 = kps[b[1]];
                     if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
@@ -2239,7 +2243,7 @@
                 const actualShoulderW = Math.abs(rs.x - ls.x);
                 const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
                 const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
-                
+
                 // 골반 깊이(Z) 산출
                 const actualHipW = Math.abs(rh.x - lh.x);
                 const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
@@ -2247,10 +2251,10 @@
 
                 // 앞/뒤 Z값 최종 배정
                 const zRightShoulder = isRightCloser ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
-                const zLeftShoulder  = isRightCloser ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
+                const zLeftShoulder = isRightCloser ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
                 const zRightHip = isRightCloser ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
-                const zLeftHip  = isRightCloser ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
+                const zLeftHip = isRightCloser ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
                 // 2. 운동학적 회전 계산 (순차적 적용)
                 rotatedPoints3D = kps.map((pt, idx) => {
@@ -2262,7 +2266,7 @@
                     else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder; // 오른쪽 팔 전체
                     else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;     // 왼쪽 다리 전체
                     else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;    // 오른쪽 다리 전체
-                    
+
                     // 얼굴 부위 (코가 가장 입체적으로 앞으로 나오게 설정)
                     if (idx === 0) z = 35 * Z_DIR;
                     else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
@@ -2336,6 +2340,75 @@
                     }
                 });
             }
+
+            // ─── [신규 추가] 3D 모달 내 좌/우 신체 부위 데이터 강제 교체(Swap) 기능 ───
+            document.getElementById('btnSwapLeftRight3D').addEventListener('click', function() {
+                const person = personDataList[activePersonIndex];
+                if (!person || !person.rawPose || !person.rawPose.keypoints) {
+                    alert("교체할 신체 데이터가 없습니다.");
+                    return;
+                }
+
+                const kps = person.rawPose.keypoints;
+
+                // 1. MoveNet 표준 키포인트의 좌/우 인덱스 쌍 매핑
+                const kpPairs = [
+                    [1, 2],   // 눈 (좌/우)
+                    [3, 4],   // 귀 (좌/우)
+                    [5, 6],   // 어깨 (좌/우)
+                    [7, 8],   // 팔꿈치 (좌/우)
+                    [9, 10],  // 손목 (좌/우)
+                    [11, 12], // 골반 (좌/우)
+                    [13, 14], // 무릎 (좌/우)
+                    [15, 16]  // 발목 (좌/우)
+                ];
+
+                // 3D 뼈대 원본 좌표(Keypoints) 좌우 교환
+                kpPairs.forEach(([lIdx, rIdx]) => {
+                    if (kps[lIdx] && kps[rIdx]) {
+                        const tempX = kps[lIdx].x;
+                        const tempY = kps[lIdx].y;
+                        const tempScore = kps[lIdx].score;
+
+                        kps[lIdx].x = kps[rIdx].x;
+                        kps[lIdx].y = kps[rIdx].y;
+                        kps[lIdx].score = kps[rIdx].score;
+
+                        kps[rIdx].x = tempX;
+                        kps[rIdx].y = tempY;
+                        kps[rIdx].score = tempScore;
+                    }
+                });
+
+                // 2. 우측 패널(right-panel) 및 2D 연동 데이터(angles) 좌우 교환
+                // 매핑 정보 -> 2(윗팔우)↔6(윗팔좌), 3(아랫팔우)↔7(아랫팔좌), 4(손목우)↔8(손목좌), 5(다리우)↔9(다리좌)
+                if (person.angles) {
+                    const anglePairs = [
+                        [2, 6], // 윗팔 (우 ↔ 좌)
+                        [3, 7], // 아랫팔 (우 ↔ 좌)
+                        [4, 8], // 손목 (우 ↔ 좌)
+                        [5, 9]  // 다리 (우 ↔ 좌)
+                    ];
+
+                    anglePairs.forEach(([rAng, lAng]) => {
+                        const temp = person.angles[rAng];
+                        person.angles[rAng] = person.angles[lAng];
+                        person.angles[lAng] = temp;
+                    });
+                }
+
+                // 3. 머리(0)와 몸통(1)의 참조선 재정렬을 위해 방향 토글 보조
+                // (좌우가 바뀌었으므로 바라보는 주 방향성을 리셋하여 정렬 유도)
+                if (window.syncAll2DTo3D) {
+                    window.syncAll2DTo3D(person);
+                }
+
+                // 4. 3D 캔버스 즉시 재렌더링
+                render3DModal();
+                
+                // 가벼운 알림 효과 (선택 사항)
+                console.log("신체 좌우 데이터가 성공적으로 교체되었습니다.");
+            });
 
             // 보정된 좌표를 메인 패널에 덮어쓰고 각도 재계산
             window.apply3DCorrection = function () {
