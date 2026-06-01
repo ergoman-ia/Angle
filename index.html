@@ -2177,83 +2177,23 @@
                 const camRad = (deltaCamYaw * Math.PI) / 180;
                 const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
                 const neckRad = (deltaNeckYaw * Math.PI) / 180;
-                
-                // ─── [3D 입체감(Z축) 및 방향 완벽 복원 로직] ───
-                // 🌟 핵심 교정 1: AI의 점수 대신, 사용자가 2D 패널에 남겨둔 '다리(좌/우)' 데이터를 최우선 기준으로 삼습니다.
-                const rightLeg = !!person.angles[5];
-                const leftLeg = !!person.angles[9];
-                const rightArm = !!person.angles[2] || !!person.angles[3];
-                const leftArm = !!person.angles[6] || !!person.angles[7];
 
-                let isRightCloser = true;
-                if (leftLeg && !rightLeg) {
-                    isRightCloser = false; // 좌측 다리만 2D 패널에 있으면 무조건 좌측이 앞
-                } else if (rightLeg && !leftLeg) {
-                    isRightCloser = true;  // 우측 다리만 있으면 무조건 우측이 앞
-                } else if (leftArm && !rightArm) {
-                    isRightCloser = false; // 다리가 없고 좌측 팔만 있으면 좌측이 앞
-                } else if (rightArm && !leftArm) {
-                    isRightCloser = true;  // 우측 팔만 있으면 우측이 앞
-                } else {
-                    // 양측 모두 있거나 없는 정면의 경우, AI 원본 점수로 보조 판단
-                    const lScore = (kps[5].score + kps[7].score + kps[11].score);
-                    const rScore = (kps[6].score + kps[8].score + kps[12].score);
-                    isRightCloser = rScore >= lScore;
-                }
-
-                // 🌟 마스터 키: 마이너스(-) Z값이 카메라 앞쪽으로 튀어나옵니다.
-                const Z_DIR = -1; 
-
-                // 🌟 핵심 교정 2: 정면 자세일 때 억지로 비틀리는 현상 완벽 방지 (인체 비례 스케일 동적 적용)
-                let maxBone = 50; // 기준이 될 가장 긴 뼈의 길이
-                const bones = [[11,13], [12,14], [5,11], [6,12]]; // 허벅지, 몸통
-                bones.forEach(b => {
-                    const p1 = kps[b[0]], p2 = kps[b[1]];
-                    if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
-                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
-                        if (dist > maxBone) maxBone = dist;
-                    }
-                });
-
-                // 가장 긴 뼈를 기준으로 해당 작업자의 100% 어깨/골반 너비 산출
-                const idealShoulderW = Math.max(maxBone * 0.8, 50);
-                const idealHipW = Math.max(maxBone * 0.6, 40);
-
-                // 어깨 깊이(Z) 산출 (정면이면 dzS가 0이 되어 비틀림 발생 안 함!)
-                const actualShoulderW = Math.abs(rs.x - ls.x);
-                const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
-                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
-                
-                // 골반 깊이(Z) 산출
-                const actualHipW = Math.abs(rh.x - lh.x);
-                const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
-                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
-
-                // 앞/뒤 Z값 최종 배정
-                const zRightShoulder = isRightCloser ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
-                const zLeftShoulder  = isRightCloser ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
-
-                const zRightHip = isRightCloser ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
-                const zLeftHip  = isRightCloser ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
-
-                // 2. 운동학적 회전 계산 (순차적 적용)
+                // 👇 여기서부터 수정: 모든 억지 Z축 계산 삭제! 1:1 절대 매핑
                 rotatedPoints3D = kps.map((pt, idx) => {
                     let x = pt.x;
                     let y = pt.y;
-                    let z = 0;
-
-                    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;        // 왼쪽 팔 전체
-                    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder; // 오른쪽 팔 전체
-                    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;     // 왼쪽 다리 전체
-                    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;    // 오른쪽 다리 전체
                     
-                    // 얼굴 부위 (코가 가장 입체적으로 앞으로 나오게 설정)
-                    if (idx === 0) z = 35 * Z_DIR;
-                    else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
+                    // 🌟 핵심: 팔다리의 억지 깊이를 모두 0으로 만들어 꼬임(좌우 교차)을 원천 차단!
+                    // 선생님 말씀대로 2D에 입력된 좌/우 값이 3D에 단 1%의 왜곡도 없이 100% 그대로 유지됩니다.
+                    let z = 0; 
+                    
+                    // 얼굴(코)만 살짝 튀어나오게 유지
+                    if (idx === 0) z = -25;
+                    else if (idx >= 1 && idx <= 4) z = -10;
 
                     let finalX = x, finalZ = z;
 
-                    // [Step A] 목 비틀림 (어깨 중심축 기준 회전) - 0~4번(머리) 점에만 적용
+                    // [Step A] 목 비틀림
                     if (idx <= 4) {
                         let rx = finalX - shoulderMid.x;
                         let rz = finalZ;
@@ -2261,7 +2201,7 @@
                         finalZ = rx * Math.sin(neckRad) + rz * Math.cos(neckRad);
                     }
 
-                    // [Step B] 몸통 비틀림 (골반 중심축 기준 회전) - 0~10번(상체 전체) 점에만 적용
+                    // [Step B] 몸통 비틀림
                     if (idx <= 10) {
                         let rx = finalX - pelvisMid.x;
                         let rz = finalZ;
@@ -2269,7 +2209,7 @@
                         finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
                     }
 
-                    // [Step C] 전체 시점 회전 (카메라 보정) - 0~16번 모든 점에 적용
+                    // [Step C] 전체 시점 회전
                     let rx = finalX - pelvisMid.x;
                     let rz = finalZ;
                     finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
@@ -2278,7 +2218,7 @@
                     return {
                         rawX: finalX, // 보정 후 원본 스케일 좌표
                         rawY: y,
-                        x: (finalX - pelvisMid.x) + (canvas.width / 2), // 캔버스 투영용 중앙 정렬 좌표
+                        x: (finalX - pelvisMid.x) + (canvas.width / 2),
                         y: (y - pelvisMid.y) + (canvas.height / 2),
                         z: finalZ,
                         score: pt.score
