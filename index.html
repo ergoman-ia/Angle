@@ -1530,8 +1530,6 @@
                 ctx.fillText(`${meta.label} ${angleText}`, tx(midX), ty(midY));
             }
 
-            // [기존 코드에서 이 부분을 찾아 교체해주세요]
-            // HTML 문자열만 반환하는 순수 함수 (직접 삽입 안 함)
             function buildAngleItemHtml(data, meta, index, isSelected, isTarget, compact = false) {
                 const compactClass = compact ? 'compact' : '';
 
@@ -1541,8 +1539,30 @@
                     if (activeData) {
                         const yawVal = (index === 0) ? (activeData.neckYaw || 0) : (activeData.trunkYaw || 0);
                         if (yawVal !== 0) {
-                            // 👇 수정: 부호를 제거하고 양수(+)는 오른쪽, 음수(-)는 왼쪽으로 매핑합니다.
-                            const direction = yawVal > 0 ? "오른쪽" : "왼쪽";
+
+                            // 🌟 [최종 보완] 3D 로직과 동일하게 전문가 입력 데이터를 최우선으로 방향 판별
+                            let isFacingRight = true;
+                            const rightLeg = !!activeData.angles[5];
+                            const leftLeg = !!activeData.angles[9];
+                            const rightArm = !!activeData.angles[2] || !!activeData.angles[3];
+                            const leftArm = !!activeData.angles[6] || !!activeData.angles[7];
+
+                            if (leftLeg && !rightLeg) isFacingRight = false;
+                            else if (rightLeg && !leftLeg) isFacingRight = true;
+                            else if (leftArm && !rightArm) isFacingRight = false;
+                            else if (rightArm && !leftArm) isFacingRight = true;
+                            else if (activeData.rawPose) {
+                                // 수동 입력이 양쪽 다 있거나 없을 때만 AI 신뢰도 점수로 판별
+                                const k = activeData.rawPose.keypoints;
+                                const leftScore = (k[5].score + k[7].score + k[11].score) / 3;
+                                const rightScore = (k[6].score + k[8].score + k[12].score) / 3;
+                                isFacingRight = rightScore >= leftScore;
+                            }
+
+                            // 방향에 따른 해부학적 좌/우 반전 처리
+                            const isAnatomicalRight = isFacingRight ? (yawVal > 0) : (yawVal < 0);
+                            const direction = isAnatomicalRight ? "오른쪽" : "왼쪽";
+
                             yawText = `<span style="font-size:12px; color:#6f42c1; font-weight:normal; margin-left:8px;">(비틀림: ${Math.abs(yawVal).toFixed(0)}°, ${direction})</span>`;
                         } else {
                             yawText = `<span style="font-size:12px; color:#6f42c1; font-weight:normal; margin-left:8px;">(비틀림: 0°)</span>`;
@@ -2198,9 +2218,9 @@
                 const deltaTrunkYaw = modalTrunkYaw - (person.trunkYaw || 0);
                 const deltaNeckYaw = modalNeckYaw - (person.neckYaw || 0);
 
-                const camRad = (deltaCamYaw * Math.PI) / 180;
-                const trunkRad = (deltaTrunkYaw * Math.PI) / 180;
-                const neckRad = (deltaNeckYaw * Math.PI) / 180;
+                const camRad = -(deltaCamYaw * Math.PI) / 180;
+                const trunkRad = -(deltaTrunkYaw * Math.PI) / 180;
+                const neckRad = -(deltaNeckYaw * Math.PI) / 180;
 
                 // 🌟 [수정 1] 2D 패널 상태를 기준으로 고정된(Baseline) 방향성 확립
                 const rightLeg = !!person.angles[5];
@@ -2442,7 +2462,6 @@
                 person.trunkYaw = modalTrunkYaw;
                 person.camYaw = modalCamYaw; // 👇 신규 추가: 적용된 카메라 회전값 저장
 
-                if (window.syncAll2DTo3D) window.syncAll2DTo3D(person);
                 autoCalculateAngles(person);
 
                 close3DModal();
