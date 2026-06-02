@@ -2143,6 +2143,7 @@
             // ─── [신규 추가] 3D 모달 구동 및 비대칭(비틀림) 보정 로직 ───
             let modalCamYaw = 0, modalTrunkYaw = 0, modalNeckYaw = 0;
             let rotatedPoints3D = []; // 보정 후 좌표 임시 저장 배열
+            let selectedPointIndex3D = -1;
 
             const open3DModalBtn = document.getElementById('open3DModalBtn');
             if (open3DModalBtn) {
@@ -2362,13 +2363,14 @@
                         if ((layerType === "background" && isBackgroundPt) ||
                             (layerType === "foreground" && !isBackgroundPt)) {
 
-                            ctx.beginPath();
-                            const radius = Math.max(3, 7 - (pt.z * 0.05));
-                            ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
+                            ctx.beginPath();                           
 
                             // 🌟 관절점 색상도 좌/우 동일하게 통일
                             let fillColor = '';
-                            if (idx <= 4) {
+                            // [신규 추가] 선택된 관절은 최우선으로 빨간색 처리
+                            if (idx === selectedPointIndex3D) {
+                                fillColor = '#ff3333';
+                            } else if (idx <= 4) {
                                 fillColor = isBackgroundPt ? '#b8a670' : '#ffeaa7'; // 머리: 노란색
                             } else if (idx % 2 !== 0) {
                                 fillColor = isBackgroundPt ? '#127356' : '#20c997'; // 좌측
@@ -2376,11 +2378,17 @@
                                 fillColor = isBackgroundPt ? '#1864ab' : '#4dabf7'; // 우측
                             }
 
+                            // [신규 추가] 선택된 관절은 원의 크기도 살짝 키워줍니다
+                            const radius = (idx === selectedPointIndex3D) ? 7 : Math.max(3, 7 - (pt.z * 0.05));
+                            ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
+
                             ctx.fillStyle = fillColor;
                             ctx.fill();
+
                             // 원근감 강조를 위해 뒤쪽 뼈대 외곽선은 어둡게 처리
-                            ctx.strokeStyle = isBackgroundPt ? '#222' : '#fff';
-                            ctx.lineWidth = 1;
+                            // [신규 추가] 선택된 관절은 테두리도 눈에 띄게 노란색으로 강조
+                            ctx.strokeStyle = (idx === selectedPointIndex3D) ? '#ffff00' : (isBackgroundPt ? '#222' : '#fff');
+                            ctx.lineWidth = (idx === selectedPointIndex3D) ? 2 : 1;
                             ctx.stroke();
                         }
                     }
@@ -2507,6 +2515,11 @@
                         }
                     }
                 }
+                if (!clickedAnyPoint) {
+                    selectedPointIndex3D = -1;
+                }
+
+                render3DModal();
             });
 
             // 2. 마우스 이동 (드래그)
