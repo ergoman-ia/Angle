@@ -1032,18 +1032,8 @@
                 }
 
                 // 각도 선택 해제
-                if (selectedAngleIndex !== -1) { selectedAngleIndex = -1; drawAll(); return; }
-
-                // 수동 추가 (Extra)
-                if (correctionTargetIndex === -1) {
-                    if (!extraTempPoints) extraTempPoints = [];
-                    extraTempPoints.push({ x: realX, y: realY });
-                    if (extraTempPoints.length === 3) {
-                        const angle = calculateAngle(...extraTempPoints);
-                        activeData.manualAngles.push({ points: [...extraTempPoints], angle, label: "추가", color: "#FF0000" });
-                        extraTempPoints = []; selectedAngleIndex = BODY_PARTS.length + activeData.manualAngles.length - 1;
-                    }
-                }
+                if (selectedAngleIndex !== -1) { selectedAngleIndex = -1; drawAll(); return; }             
+                
                 drawAll();
             });
 
