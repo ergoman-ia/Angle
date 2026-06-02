@@ -2490,36 +2490,41 @@
             });
 
             // 1. 마우스 누름 (정밀 스케일링 적용)
+            // 1. 마우스 누름 (정밀 스케일링 적용)
             modalCanvas.addEventListener('mousedown', function (e) {
                 // 좌클릭(0) 또는 우클릭(2)만 허용
                 if (e.button !== 0 && e.button !== 2) return;
 
                 const rect = modalCanvas.getBoundingClientRect();
-                // [핵심] CSS 화면 크기와 Canvas 내부 픽셀 간의 비율(Scale) 오차 보정
                 const scaleX = modalCanvas.width / rect.width;
                 const scaleY = modalCanvas.height / rect.height;
 
                 const mx = (e.clientX - rect.left) * scaleX;
                 const my = (e.clientY - rect.top) * scaleY;
 
+                let clickedAnyPoint = false; // 🟢 [수정 1] 변수 선언 추가 (에러 해결)
+
                 for (let i = 0; i < rotatedPoints3D.length; i++) {
                     const pt = rotatedPoints3D[i];
                     if (pt && pt.score > 0.1) {
                         const dist = Math.hypot(pt.x - mx, pt.y - my);
-                        // 선택 판정 범위를 20px로 넓혀서 편안하게 잡히도록 개선
                         if (dist < 20) {
                             modalDraggingIdx = i;
+                            selectedPointIndex3D = i; // 🟢 [수정 2] 클릭한 관절 인덱스를 저장하여 색상 변경 트리거
+                            clickedAnyPoint = true;   // 🟢 [수정 3] 클릭 성공 여부 저장
                             lastModalMousePos = { x: mx, y: my };
                             modalCanvas.style.cursor = 'grabbing';
                             break;
                         }
                     }
                 }
-                if (!clickedAnyPoint) {
+                
+                // 허공을 클릭하면 선택 해제 (원래 색상으로 복귀)
+                if (!clickedAnyPoint) { 
                     selectedPointIndex3D = -1;
                 }
 
-                render3DModal();
+                render3DModal(); // 화면 즉시 갱신
             });
 
             // 2. 마우스 이동 (드래그)
