@@ -1,0 +1,2984 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>전문가용 각도 분석</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@4.15.0/dist/tf-backend-cpu.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
+
+    <script type="module">
+        import { firebaseConfig } from './secrets.js';
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
+        import { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
+
+        const app = initializeApp(firebaseConfig);
+
+        window.fbDb = getFirestore(app);
+        window.fsDoc = doc;
+        window.fsSetDoc = setDoc;
+        window.fsUpdateDoc = updateDoc;
+        window.fsDeleteDoc = deleteDoc;
+        window.fsCollection = collection;
+        window.fsGetDocs = getDocs;
+        window.fsServerTimestamp = serverTimestamp;
+    </script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f4f4f4;
+            margin: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .left-panel,
+        .right-panel {
+            background-color: #fff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+
+        canvas {
+            border: 1px solid #ccc;
+            margin-top: 50px;
+            width: 800px;
+            height: 600px;
+            display: block;
+            cursor: crosshair;
+            background-color: #eee;
+        }
+
+        canvas.grabbing {
+            cursor: grabbing;
+        }
+
+        canvas.grab {
+            cursor: grab;
+        }
+
+        canvas.pointer {
+            cursor: pointer;
+        }
+
+        canvas.crosshair {
+            cursor: crosshair;
+        }
+
+        #customFileBtn {
+            background-color: #007BFF;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            border: none;
+            font-size: 16px;
+            cursor: pointer;
+            position: absolute;
+            top: 10px;
+            left: 15px;
+            z-index: 10;
+        }
+
+        #customFileBtn:hover {
+            background-color: #0056b3;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        #statusMsg {
+            position: absolute;
+            top: 15px;
+            left: 140px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+
+        .right-panel {
+            width: 300px;
+        }
+
+        .manage-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .manage-btn {
+            flex: 1;
+            padding: 8px 0;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 13px;
+            color: white;
+            transition: opacity 0.2s;
+        }
+
+        .btn-add {
+            background-color: #17a2b8;
+        }
+
+        .btn-del {
+            background-color: #dc3545;
+        }
+
+        .manage-btn:hover {
+            opacity: 0.9;
+        }
+
+        .manage-btn.active {
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.5);
+            background-color: #117a8b;
+        }
+
+        .angle-list {
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #333;
+            min-height: 250px;
+            border: 1px solid #ddd;
+            padding: 10px;
+            border-radius: 8px;
+            background: #fafafa;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .angle-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #eee;
+            padding: 10px 8px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .angle-item:hover {
+            background-color: #f0f0f0;
+        }
+
+        .angle-item.active {
+            background-color: #e8f0fe;
+            border: 1px solid #007BFF;
+        }
+
+        .angle-item.missing {
+            color: #999;
+            background-color: #f9f9f9;
+            border: 1px dashed #ccc;
+        }
+
+        .angle-item.missing:hover {
+            background-color: #fff3cd;
+            color: #856404;
+            border-color: #ffeeba;
+        }
+
+        .angle-name-group {
+            display: flex;
+            align-items: center;
+        }
+
+        .angle-color-box {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            margin-right: 8px;
+            border-radius: 3px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+        }
+
+        /* 양측 헤더 */
+        .bilateral-header {
+            display: flex;
+            gap: 5px;
+            margin: 6px 0 2px 0;
+        }
+
+        .bilateral-header span {
+            flex: 1;
+            background-color: #e0e7ff;
+            color: #3730a3;
+            font-size: 11px;
+            font-weight: bold;
+            text-align: center;
+            padding: 3px 0;
+            border-radius: 4px;
+        }
+
+        /* 양측 2열 행 */
+        .angle-row-bilateral {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 3px;
+        }
+
+        /* 2열 안에 들어가는 항목 (좁으므로 세로 배치) */
+        .angle-item.compact {
+            flex: 1;
+            min-width: 0;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 2px;
+            padding: 6px 5px;
+            font-size: 12px;
+            border-bottom: none;
+            border: 1px solid #eee;
+        }
+
+        .angle-item.compact .angle-name-group {
+            font-size: 11px;
+        }
+
+        .angle-item.compact.active {
+            background-color: #e8f0fe;
+            border: 1px solid #007BFF;
+        }
+
+        .angle-item.compact.missing {
+            border: 1px dashed #ccc;
+        }
+
+        #peopleCount {
+            font-weight: bold;
+            margin-bottom: 5px;
+            font-size: 16px;
+            color: #444;
+        }
+
+        button.save {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 12px 0;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            transition: background-color 0.3s ease;
+        }
+
+        button.save:hover {
+            background-color: #218838;
+        }
+
+        .guide-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            background: #eee;
+            padding: 8px;
+            border-radius: 5px;
+            line-height: 1.6;
+        }
+
+        .guide-highlight {
+            color: #d9534f;
+            font-weight: bold;
+        }
+
+        /* 👇 신규 추가: 갤러리 및 썸네일 스타일 */
+        #galleryWrapper {
+            width: 100%;
+            margin-top: 15px;
+            border-top: 2px dashed #ccc;
+            padding-top: 15px;
+        }
+
+        .gallery-container {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .thumb-card {
+            position: relative;
+            width: 100%;
+            box-sizing: border-box;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 4px 4px 1px 4px;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .thumb-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .thumb-card img {
+            width: 100%;
+            height: 90px;
+            /* 기존 150px에서 축소 */
+            object-fit: contain;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+
+        .btn-delete-thumb {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            background: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+        }
+
+        .btn-delete-thumb:hover {
+            background: #c82333;
+        }
+
+        /* 👇 신규 추가: 3D 보정 모달 스타일 */
+        #modal3D-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            z-index: 999;
+            backdrop-filter: blur(3px);
+        }
+
+        #modal3D {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff;
+            padding: 20px;
+            border-radius: 12px;
+            z-index: 1000;
+            width: 900px;
+            /* 👈 기존 450px에서 900px로 2배 확대 */
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #f4f4f4;
+            padding-bottom: 10px;
+            color: #333;
+        }
+
+        /* 👈 기존 text-align: center를 지우고 좌우 분할(flex) 구조 적용 */
+        .modal-body {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        /* 👈 버튼들이 우측 패널 맨 아래에 고정되도록 수정 */
+        .modal-footer {
+            margin-top: auto;
+            padding-top: 15px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>전문가용 각도 분석 (Focus Mode)</h1>
+
+    <div id="modal3D-overlay"></div>
+    <div id="modal3D">
+        <div class="modal-header">🧭 정면 비틀림 및 불균형 보정 (3D)</div>
+        <div class="modal-body">
+
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+                <canvas id="canvas3DModal" width="480" height="480"
+                    style="background:#1e1e1e; border-radius:8px; width: 100%;"></canvas>
+                <p style="font-size:12px; color:#666; margin-top:8px;">관절을 클릭하여 선택한 후 우측 슬라이더로 미세 조정하세요.</p>
+            </div>
+
+            <div style="width: 380px; display: flex; flex-direction: column; min-height: 480px;">
+
+                <div
+                    style="display: flex; flex-direction: column; gap: 8px; background: #f8f9fa; padding: 12px; border-radius: 6px;">
+                    <div style="font-weight:bold; font-size:13px; margin-bottom: 5px;">🔄 전체/몸통/목 비틀림</div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#555;">전체 시점:</label>
+                        <input type="range" id="camYawSlider" min="-90" max="90" value="0" style="flex:1;">
+                        <span id="camYawValue"
+                            style="font-weight:bold; color:#007BFF; min-width:35px; text-align: right;">0°</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#d9534f;">몸통 비틀림:</label>
+                        <input type="range" id="trunkYawSlider" min="-60" max="60" value="0" style="flex:1;">
+                        <span id="trunkYawValue"
+                            style="font-weight:bold; color:#d9534f; min-width:35px; text-align: right;">0°</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#28a745;">목 비틀림:</label>
+                        <input type="range" id="neckYawSlider" min="-60" max="60" value="0" style="flex:1;">
+                        <span id="neckYawValue"
+                            style="font-weight:bold; color:#28a745; min-width:35px; text-align: right;">0°</span>
+                    </div>
+                </div>
+
+                <div id="fineTunePanel"
+                    style="margin-top: 15px; display: none; flex-direction: column; gap: 8px; background: #eef2f5; padding: 12px; border-radius: 6px; border: 1px solid #cdd4db;">
+                    <div style="font-weight:bold; color:#333; margin-bottom: 5px; font-size: 13px;">
+                        🎯 선택된 부위 조정: <span id="selectedJointName" style="color:#007BFF;">없음</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;
+            background:#fff; border:1px solid #ccc; border-radius:5px; padding:5px 8px;">
+                        <span style="font-size:11px; font-weight:bold; color:#555; min-width:50px;">이동 배율:</span>
+                        <label style="font-size:12px; cursor:pointer;">
+                            <input type="radio" name="ftScale" value="1" checked> ×1 <span
+                                style="color:#888;">(정밀)</span>
+                        </label>
+                        <label style="font-size:12px; cursor:pointer;">
+                            <input type="radio" name="ftScale" value="3"> ×3 <span style="color:#888;">(보통)</span>
+                        </label>
+                        <label style="font-size:12px; cursor:pointer;">
+                            <input type="radio" name="ftScale" value="5"> ×5 <span style="color:#888;">(크게)</span>
+                        </label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">X축(좌/우):</label>
+                        <input type="range" id="fineTuneX" min="-100" max="100" value="0" style="flex:1;">
+                        <span id="fineTuneXVal"
+                            style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">Y축(상/하):</label>
+                        <input type="range" id="fineTuneY" min="-100" max="100" value="0" style="flex:1;">
+                        <span id="fineTuneYVal"
+                            style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">Z축(앞/뒤):</label>
+                        <input type="range" id="fineTuneZ" min="-100" max="100" value="0" style="flex:1;">
+                        <span id="fineTuneZVal"
+                            style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button class="save"
+                        style="background-color: #6c757d; width: auto; padding: 8px 15px; font-size: 14px;"
+                        onclick="close3DModal()">취소</button>
+                    <button id="btnSwapLeftRight3D" class="btn btn-warning"
+                        style="padding: 8px 15px; background-color: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;">🔄
+                        좌/우 바꾸기</button>
+                    <button class="save"
+                        style="background-color: #6f42c1; width: auto; padding: 8px 15px; font-size: 14px;"
+                        onclick="apply3DCorrection()">보정값 각도 반영</button>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+
+    <div class="container">
+        <div class="left-panel">
+            <button id="customFileBtn">이미지 선택</button>
+            <span id="statusMsg">AI 엔진 초기화 중...</span>
+            <input type="file" id="imageLoader" accept="image/*" />
+            <canvas id="canvas" width="800" height="600"></canvas>
+
+            <div id="galleryWrapper">
+                <div class="gallery-container" id="galleryContainer">
+                    <p style="color:#666; grid-column: span 5; margin: 0;">데이터를 불러오는 중입니다...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <p id="peopleCount">대기 중...</p>
+
+            <div class="manage-group">
+                <button class="manage-btn btn-add" id="addPersonBtn">+ 사람 추가 (영역 드래그)</button>
+                <button class="manage-btn btn-del" id="delPersonBtn">- 현재 사람 삭제</button>
+            </div>
+
+            <div class="angle-list" id="angleDisplay"></div>
+            <div class="guide-text">
+                <strong style="font-size: 14px;">📘 사용 순서 가이드</strong><br />
+                <div style="margin-top:5px; line-height: 1.6;">
+                    1. <strong>이미지 선택:</strong> 파일을 불러옵니다.<br />
+                    2. <strong>사람 관리:</strong> AI 자동 인식 수행<br />
+                    &nbsp;&nbsp; <span style="color:#17a2b8; font-weight:bold;">* 미인식 시 '+ 사람 추가'로 드래그</span><br />
+                    3. <strong>정밀 보정:</strong><br />
+                    &nbsp;&nbsp; - <strong>리스트 클릭:</strong> 수정할 부위 선택<br />
+                    &nbsp;&nbsp; - <strong>드래그:</strong> 마우스로 관절 점 이동<br />
+                    4. <strong>저장:</strong> '분석 이미지 저장' 버튼 클릭<br />
+                    <span style="color:#f03f20; font-weight:bold;">※동 각도분석 자료를 인간공학 평가도구에 활용</span>
+                </div>
+            </div>
+
+            <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
+
+            <button class="save" id="open3DModalBtn"
+                style="background-color: #6f42c1; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                🧭 비틀림 및 불균형 보정 (3D)
+            </button>
+
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
+                <input type="text" id="siteName" placeholder="현장명 입력 (예: A구역)"
+                    style="padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+            </div>
+            <button class="save" id="saveDbBtn" style="background-color: #007BFF;">클라우드(DB)에 저장</button>
+
+            <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
+            <div style="display: flex; gap: 10px;">
+                <button class="save" id="saveBtn" style="flex: 1;">분석 이미지 인쇄</button>
+                <button class="save" id="exportCsvBtn" style="flex: 1; background-color: #17a2b8;">DB to CSV</button>
+            </div>
+
+        </div>
+
+        <script>
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const imageLoader = document.getElementById('imageLoader');
+            const angleDisplay = document.getElementById('angleDisplay');
+            const peopleCount = document.getElementById('peopleCount');
+            const saveBtn = document.getElementById('saveBtn');
+            const customFileBtn = document.getElementById('customFileBtn');
+            const statusMsg = document.getElementById('statusMsg');
+
+            const addPersonBtn = document.getElementById('addPersonBtn');
+            const delPersonBtn = document.getElementById('delPersonBtn');
+
+            let img = new Image();
+            let imgScale = 1;
+            let imgOffsetX = 0;
+            let imgOffsetY = 0;
+
+            let originalImageDataUrl = null;
+
+            let personDataList = [];
+            let activePersonIndex = -1;
+
+            const BODY_PARTS = [
+                { id: 'neck', label: "목", color: "#FF00FF" }, // 0
+                { id: 'trunk', label: "허리", color: "#FFA500" }, // 1
+                { id: 'upper_R', label: "윗팔(우)", color: "#00FFFF" }, // 2  ← 양측 시 우측 / 단측 시 보이는 쪽
+                { id: 'lower_R', label: "아랫팔(우)", color: "#32CD32" }, // 3
+                { id: 'wrist_R', label: "손목(우)", color: "#FFD700" }, // 4  ← 수동입력 전용
+                { id: 'leg_R', label: "다리(우)", color: "#1E90FF" }, // 5
+                { id: 'upper_L', label: "윗팔(좌)", color: "#00CCAA" }, // 6  ← 양측 감지 시에만 활성
+                { id: 'lower_L', label: "아랫팔(좌)", color: "#22BB44" }, // 7
+                { id: 'wrist_L', label: "손목(좌)", color: "#CCAA00" }, // 8  ← 수동입력 전용
+                { id: 'leg_L', label: "다리(좌)", color: "#4466FF" }, // 9  ← 양측 감지 시에만 활성
+            ];
+            // trunk(1)은 별도 처리이므로 INVERTED_ANGLES에서 제거
+            const INVERTED_ANGLES = [4, 5, 8, 9];
+
+            let selectedAngleIndex = -1;
+            let correctionTargetIndex = -1;
+            let tempPoints = [];
+            let extraTempPoints = [];
+            let draggingPoint = null;
+
+            let isAddingMode = false;
+            let selectionStart = null;
+            let selectionRect = null;
+
+            let detector = null;
+
+            // ── 뷰포트 줌/패닝 상태 ──────────────────────────────────────
+            let viewZoom = 1.0;   // 확대 배율 (1.0 = 원본 핏, 최대 8.0)
+            let viewPanX = 0;     // 패닝 오프셋 X (canvas px)
+            let viewPanY = 0;     // 패닝 오프셋 Y (canvas px)
+            let isPanning = false; // 우클릭 패닝 중 여부
+            let panStart = { x: 0, y: 0 }; // 패닝 시작점
+
+            let _rafPending = false;
+            function requestDraw() {
+                if (!_rafPending) {
+                    _rafPending = true;
+                    requestAnimationFrame(() => { drawAll(); _rafPending = false; });
+                }
+            }
+
+            async function loadModel() {
+                try {
+                    statusMsg.textContent = "호환성 모드(CPU) 설정 중...";
+                    await tf.setBackend('cpu');
+                    await tf.ready();
+                    const model = poseDetection.SupportedModels.MoveNet;
+                    const detectorConfig = { modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING };
+                    detector = await poseDetection.createDetector(model, detectorConfig);
+                    statusMsg.textContent = "준비 완료! 사진을 선택하세요.";
+                    statusMsg.style.color = "#28a745";
+                } catch (error) {
+                    console.error(error);
+                    statusMsg.textContent = "오류: 콘솔 확인 필요";
+                }
+            }
+            loadModel();
+
+            // BlazePose Lite 로드 (3D Z좌표 추출 전용)
+            async function loadBlazePose3D() {
+                try {
+                    detector3D = await poseDetection.createDetector(
+                        poseDetection.SupportedModels.BlazePose,
+                        {
+                            runtime: 'tfjs',
+                            modelType: 'lite',       // lite: 빠름 / heavy: 정확
+                            enableSmoothing: false,
+                            enableSegmentation: false,
+                        }
+                    );
+                    console.log('BlazePose 3D 준비 완료');
+                } catch (e) {
+                    console.warn('BlazePose 로드 실패 → 기하학적 Z 추정 사용:', e);
+                    detector3D = null;
+                }
+            }
+            loadBlazePose3D(); // 기존 loadModel(); 호출 바로 다음 줄에 추가
+
+            window.onload = function () {
+                ctx.fillStyle = '#eeeeee';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#999999';
+                ctx.font = '20px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText("'이미지 선택' 버튼을 누르시거나 아래 DB에서 선택해주세요.", canvas.width / 2, canvas.height / 2);
+            };
+
+            customFileBtn.addEventListener('click', () => imageLoader.click());
+
+            imageLoader.addEventListener('change', function (e) {
+                if (e.target.files.length === 0) return;
+                const reader = new FileReader();
+                reader.onload = function (event) {
+                    img = new Image();
+                    img.onload = function () {
+                        resetData();
+                        originalImageDataUrl = event.target.result;
+                        peopleCount.textContent = '분석 중...';
+                        calculateImageScale();
+                        drawAll();
+                        if (detector) {
+                            detectPoseFull();
+                        } else {
+                            setTimeout(() => { if (detector) detectPoseFull(); }, 1500);
+                        }
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(e.target.files[0]);
+            });
+
+            // 🛠️ [신규 추가] 3D 모달 활성화 중 Tab 키를 누르면 관절을 순환 선택하는 이벤트
+            window.addEventListener('keydown', function (e) {
+                const modal = document.getElementById('modal3D');
+
+                // 3D 모달이 화면에 열려있는 상태일 때만 단독 작동
+                if (modal && modal.style.display === 'block') {
+                    if (e.key === 'Tab') {
+                        e.preventDefault(); // 브라우저 고유의 포커스 이동 현상 방지
+
+                        const kps = personDataList[activePersonIndex].rawPose.keypoints;
+                        let next = selectedPointIndex3D;
+                        let found = false;
+                        for (let attempt = 0; attempt < 17; attempt++) {
+                            next = e.shiftKey ? (next <= 0 ? 16 : next - 1) : (next + 1) % 17;
+                            // 눈(1,2) 제외 + score 0.1 이하인 비가시 관절 제외
+                            if (!NON_SELECTABLE_JOINTS.includes(next) && kps[next] && kps[next].score > 0.1) {
+                                selectedPointIndex3D = next;
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        // 지난번에 구현한 미세조정 패널 UI 갱신 함수 호출
+                        if (typeof updateFineTunePanel === 'function') {
+                            updateFineTunePanel(selectedPointIndex3D);
+                        }
+
+                        // 3D 화면을 즉시 갱신하여 선택된 관절 표시 효과(강조색 등) 반영
+                        render3DModal();
+                    }
+                }
+            });
+
+            function resetData() {
+                personDataList = [];
+                originalImageDataUrl = null;
+                activePersonIndex = -1;
+                selectedAngleIndex = -1;
+                correctionTargetIndex = -1;
+                tempPoints = [];
+                isAddingMode = false;
+                selectionStart = null;
+                selectionRect = null;
+                addPersonBtn.classList.remove('active');
+                viewZoom = 1.0; viewPanX = 0; viewPanY = 0;
+
+                currentEditSessionId = null;
+                const siteNameInput = document.getElementById('siteName');
+                if (siteNameInput) siteNameInput.value = '';
+                const saveDbBtn = document.getElementById('saveDbBtn');
+                if (saveDbBtn) saveDbBtn.textContent = '클라우드(DB)에 저장';
+            }
+
+            function calculateImageScale() {
+                const scaleX = canvas.width / img.width;
+                const scaleY = canvas.height / img.height;
+                imgScale = Math.min(scaleX, scaleY);
+                imgOffsetX = (canvas.width - img.width * imgScale) / 2;
+                imgOffsetY = (canvas.height - img.height * imgScale) / 2;
+            }
+
+            async function detectPoseFull() {
+                if (!detector) return;
+                statusMsg.textContent = "전체 이미지 분석 중...";
+                statusMsg.style.color = "#e67e22";
+                setTimeout(async () => {
+                    try {
+                        const poses = await detector.estimatePoses(img, { maxPoses: 6, flipHorizontal: false });
+                        personDataList = poses.map(pose => createPersonData(pose));
+
+                        personDataList.sort((a, b) => getPersonCenterX(a) - getPersonCenterX(b));
+
+                        peopleCount.textContent = `감지된 사람: ${personDataList.length}명`;
+                        if (personDataList.length > 0) {
+                            activePersonIndex = 0;
+                            statusMsg.textContent = "분석 완료. 사람을 선택해 수정하세요.";
+                            statusMsg.style.color = "#28a745";
+                        } else {
+                            statusMsg.textContent = "사람을 찾을 수 없습니다.";
+                        }
+                        drawAll();
+                    } catch (e) {
+                        console.error(e);
+                        statusMsg.textContent = "분석 중 오류 발생";
+                    }
+                }, 100);
+            }
+
+            async function analyzeRegion(rect) {
+                if (!detector) return;
+                const rawX = ((rect.x - viewPanX) / viewZoom - imgOffsetX) / imgScale;
+                const rawY = ((rect.y - viewPanY) / viewZoom - imgOffsetY) / imgScale;
+                const rawW = rect.w / (imgScale * viewZoom);
+                const rawH = rect.h / (imgScale * viewZoom);
+                const srcX = Math.max(0, rawX);
+                const srcY = Math.max(0, rawY);
+                const srcW = Math.min(img.width - srcX, rawW);
+                const srcH = Math.min(img.height - srcY, rawH);
+
+                if (srcW <= 0 || srcH <= 0) { alert("영역 오류"); return; }
+                statusMsg.textContent = "영역 정밀 분석 중...";
+
+                const offCanvas = document.createElement('canvas');
+                offCanvas.width = srcW; offCanvas.height = srcH;
+                const offCtx = offCanvas.getContext('2d');
+                offCtx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+
+                try {
+                    const poses = await detector.estimatePoses(offCanvas, { maxPoses: 1, flipHorizontal: false });
+                    let newPerson;
+                    if (poses.length > 0) {
+                        const pose = poses[0];
+                        pose.keypoints.forEach(k => { k.x += srcX; k.y += srcY; });
+                        newPerson = createPersonData(pose);
+                        statusMsg.textContent = "사람 추가됨.";
+                        statusMsg.style.color = "#28a745";
+                    } else {
+                        newPerson = createPersonData(null);
+                        statusMsg.textContent = "수동 입력 필요.";
+                    }
+
+                    personDataList.push(newPerson);
+
+                    personDataList.sort((a, b) => getPersonCenterX(a) - getPersonCenterX(b));
+                    // 정렬로 인해 바뀐 인덱스를 찾아 활성화(선택) 유지
+                    activePersonIndex = personDataList.indexOf(newPerson);
+
+                    peopleCount.textContent = `감지된 사람: ${personDataList.length}명`;
+                    drawAll();
+                } catch (e) { console.error(e); }
+            }
+
+            function createPersonData(rawPose) {
+                const data = {
+                    rawPose: rawPose,
+                    angles: new Array(10).fill(null),
+                    manualAngles: [],
+                    isBilateral: { arms: false, legs: false },
+                    neckYaw: 0,
+                    trunkYaw: 0,
+                    camYaw: 0     // 👇 신규 추가: 카메라 시점 비틀림 값 저장소
+                };
+                if (rawPose) autoCalculateAngles(data);
+                return data;
+            }
+
+            function autoCalculateAngles(personData) {
+                if (!personData.rawPose) return;
+                const k = personData.rawPose.keypoints;
+
+                // ✅ 수정 1: 억지 양측 인식을 막기 위해 신뢰도 임계값을 0.20 -> 0.45로 대폭 상향
+                const SCORE_TH = 0.45;
+
+                // ── 양측 감지 여부 판단 ──────────────────────────────────
+                const bothShoulders = k[5].score > SCORE_TH && k[6].score > SCORE_TH;
+                const bothHips = k[11].score > SCORE_TH && k[12].score > SCORE_TH;
+                personData.isBilateral = { arms: bothShoulders, legs: bothHips };
+
+                // 단측일 때 방향 (점수가 높은 쪽이 카메라를 향한 쪽)
+                const leftScore = (k[5].score + k[7].score + k[11].score) / 3;
+                const rightScore = (k[6].score + k[8].score + k[12].score) / 3;
+                const isFacingRight = rightScore >= leftScore;
+
+                // ── 목 (index 0): 몸통 연장선 기준 ───────────────────────
+                if (bothShoulders && bothHips) {
+                    const sm = { x: (k[5].x + k[6].x) / 2, y: (k[5].y + k[6].y) / 2 };
+                    const hm = { x: (k[11].x + k[12].x) / 2, y: (k[11].y + k[12].y) / 2 };
+                    const headI = k[0].score > 0.15 ? 0 : (isFacingRight ? 4 : 3);
+                    if (k[headI].score > 0.1) {
+                        const head = { x: k[headI].x, y: k[headI].y };
+                        const dx = sm.x - hm.x, dy = sm.y - hm.y;
+                        const len = Math.hypot(dx, dy) || 1;
+                        const pRef = { x: sm.x + (dx / len) * (len * 0.5), y: sm.y + (dy / len) * (len * 0.5) };
+                        let angle = calculateAngle(head, sm, pRef);
+
+                        // 👇 정면(양측 감지) 상태에서도 목 젖힘(-)을 정확히 판별
+                        const cross = dx * (head.y - sm.y) - dy * (head.x - sm.x);
+                        const isNeckExt = isFacingRight ? cross < 0 : cross > 0;
+                        if (isNeckExt) angle = -angle;
+
+                        personData.angles[0] = { points: [head, sm, pRef], angle };
+                    }
+                } else {
+                    const earI = isFacingRight ? 4 : 3;
+                    const shI = isFacingRight ? 6 : 5;
+                    const hipI = isFacingRight ? 12 : 11;
+                    if (k[earI].score > 0.1 && k[shI].score > 0.1 && k[hipI].score > 0.1) {
+                        const ear = { x: k[earI].x, y: k[earI].y };
+                        const shoulder = { x: k[shI].x, y: k[shI].y };
+                        const hip = { x: k[hipI].x, y: k[hipI].y };
+                        const dx = shoulder.x - hip.x, dy = shoulder.y - hip.y;
+                        const len = Math.hypot(dx, dy) || 1;
+                        const pRef = { x: shoulder.x + (dx / len) * (len * 0.5), y: shoulder.y + (dy / len) * (len * 0.5) };
+                        let angle = calculateAngle(ear, shoulder, pRef);
+
+                        // 허리 연장선 방향(dx,dy)과 귀 벡터의 외적으로 젖힘 판단
+                        const cross = dx * (ear.y - shoulder.y) - dy * (ear.x - shoulder.x);
+                        const isNeckExt = isFacingRight ? cross < 0 : cross > 0;
+                        if (isNeckExt) angle = -angle;
+
+                        personData.angles[0] = { points: [ear, shoulder, pRef], angle };
+                    }
+                }
+
+                // ── 허리 (index 1) ────────────────────────────────────────
+                if (bothShoulders && bothHips) {
+                    const sm = { x: (k[5].x + k[6].x) / 2, y: (k[5].y + k[6].y) / 2 };
+                    const hm = { x: (k[11].x + k[12].x) / 2, y: (k[11].y + k[12].y) / 2 };
+                    const dist = Math.hypot(sm.x - hm.x, sm.y - hm.y);
+                    const pv = { x: hm.x, y: hm.y - dist };
+                    let angle = calculateAngle(pv, hm, sm);
+                    // 어깨 중점이 골반 중점보다 수직선 뒤쪽이면 젖힘
+                    const isExt = isFacingRight ? sm.x < hm.x : sm.x > hm.x;
+                    if (isExt) angle = -angle;
+                    personData.angles[1] = { points: [pv, hm, sm], angle };
+                } else {
+                    const si = isFacingRight ? 6 : 5;
+                    const hi = isFacingRight ? 12 : 11;
+                    if (k[si].score > 0.1 && k[hi].score > 0.1) {
+                        const shoulder = { x: k[si].x, y: k[si].y };
+                        const hip = { x: k[hi].x, y: k[hi].y };
+                        const dist = Math.hypot(shoulder.x - hip.x, shoulder.y - hip.y);
+                        const pv = { x: hip.x, y: hip.y - dist };
+                        let angle = calculateAngle(pv, hip, shoulder);
+                        const isExt = isFacingRight ? shoulder.x < hip.x : shoulder.x > hip.x;
+                        if (isExt) angle = -angle;
+                        personData.angles[1] = { points: [pv, hip, shoulder], angle };
+                    }
+                }
+
+                // ── 팔 ──────────────────────────────────────────────────
+                if (bothShoulders) {
+                    _calcUpperArm(personData, k, 12, 6, 8, 2);   // 우
+                    _calcLowerArm(personData, k, 6, 8, 10, 3);   // 우
+                    _calcUpperArm(personData, k, 11, 5, 7, 6);   // 좌
+                    _calcLowerArm(personData, k, 5, 7, 9, 7);    // 좌
+                } else {
+                    if (isFacingRight) {
+                        _calcUpperArm(personData, k, 12, 6, 8, 2); // 우측
+                        _calcLowerArm(personData, k, 6, 8, 10, 3);
+                    } else {
+                        _calcUpperArm(personData, k, 11, 5, 7, 6); // 좌측
+                        _calcLowerArm(personData, k, 5, 7, 9, 7);
+                    }
+                }
+
+                // ── 다리 ────────────────────────────────────────────────
+                if (bothHips) {
+                    _calcLeg(personData, k, 12, 14, 16, 5);  // 우
+                    _calcLeg(personData, k, 11, 13, 15, 9);  // 좌
+                } else {
+                    if (isFacingRight) {
+                        _calcLeg(personData, k, 12, 14, 16, 5); // 우측
+                    } else {
+                        _calcLeg(personData, k, 11, 13, 15, 9); // 좌측
+                    }
+                }
+            }
+
+            // ── 헬퍼: 윗팔 (골반-어깨-팔꿈치) ──────────────────────────
+            function _calcUpperArm(pd, k, hiI, shI, elI, outIdx) {
+                if (k[hiI].score > 0.1 && k[shI].score > 0.1 && k[elI].score > 0.1) {
+                    const p1 = { x: k[hiI].x, y: k[hiI].y }, p2 = { x: k[shI].x, y: k[shI].y }, p3 = { x: k[elI].x, y: k[elI].y };
+                    pd.angles[outIdx] = { points: [p1, p2, p3], angle: calculateAngle(p1, p2, p3) };
+                }
+            }
+            // ── 헬퍼: 아랫팔 (어깨-팔꿈치-손목) ────────────────────────
+            function _calcLowerArm(pd, k, shI, elI, wrI, outIdx) {
+                if (k[shI].score > 0.1 && k[elI].score > 0.1 && k[wrI].score > 0.1) {
+                    const p1 = { x: k[shI].x, y: k[shI].y }, p2 = { x: k[elI].x, y: k[elI].y }, p3 = { x: k[wrI].x, y: k[wrI].y };
+                    pd.angles[outIdx] = { points: [p1, p2, p3], angle: calculateAngle(p1, p2, p3) };
+                }
+            }
+            // ── 헬퍼: 다리 (골반-무릎-발목, 180도 보정) ─────────────────
+            function _calcLeg(pd, k, hiI, knI, anI, outIdx) {
+                if (k[hiI].score > 0.1 && k[knI].score > 0.1 && k[anI].score > 0.1) {
+                    const p1 = { x: k[hiI].x, y: k[hiI].y }, p2 = { x: k[knI].x, y: k[knI].y }, p3 = { x: k[anI].x, y: k[anI].y };
+                    pd.angles[outIdx] = { points: [p1, p2, p3], angle: 180 - calculateAngle(p1, p2, p3) };
+                }
+            }
+
+            // ── 라벨 동적 반환: 단측일 때 (우)/(좌) 제거 ─────────────────
+            function getDisplayMeta(i, activeData) {
+                const base = BODY_PARTS[i];
+                if (!activeData.isBilateral) return base;
+                const { arms, legs } = activeData.isBilateral;
+                if ((i >= 2 && i <= 4) && !arms) return { ...base, label: base.label.replace('(우)', '') };
+                if (i === 5 && !legs) return { ...base, label: base.label.replace('(우)', '') };
+                if ((i >= 6 && i <= 8) && !arms) return { ...base, label: base.label.replace('(좌)', '') };
+                if (i === 9 && !legs) return { ...base, label: base.label.replace('(좌)', '') };
+                return base;
+            }
+
+            // --- 이벤트 ---
+            addPersonBtn.addEventListener('click', function () {
+                if (!img.src || img.width === 0) { alert("이미지 먼저!"); return; }
+                isAddingMode = !isAddingMode;
+                if (isAddingMode) {
+                    addPersonBtn.classList.add('active');
+                    addPersonBtn.textContent = "취소";
+                    canvas.style.cursor = "crosshair";
+                } else {
+                    addPersonBtn.classList.remove('active');
+                    addPersonBtn.textContent = "+ 사람 추가 (영역 드래그)";
+                    canvas.style.cursor = "default";
+                    selectionRect = null;
+                    drawAll();
+                }
+            });
+
+            delPersonBtn.addEventListener('click', function () {
+                if (activePersonIndex === -1 || personDataList.length === 0) return;
+                personDataList.splice(activePersonIndex, 1);
+                activePersonIndex = Math.max(0, activePersonIndex - 1);
+                if (personDataList.length === 0) activePersonIndex = -1;
+                peopleCount.textContent = `감지된 사람: ${personDataList.length}명`;
+                selectedAngleIndex = -1; correctionTargetIndex = -1; tempPoints = [];
+                drawAll();
+            });
+
+            canvas.addEventListener('mousedown', function (e) {
+                if (e.button === 2) {
+                    if (viewZoom > 1.0) {
+                        isPanning = true;
+                        panStart = { x: e.clientX, y: e.clientY };
+                    }
+                    return;
+                }
+
+                const { realX, realY, canvasX, canvasY } = getMousePos(e);
+
+                if (isAddingMode) {
+                    selectionStart = { x: canvasX, y: canvasY };
+                    selectionRect = { x: canvasX, y: canvasY, w: 0, h: 0 };
+                    return;
+                }
+                if (activePersonIndex === -1 && personDataList.length === 0) return;
+                const activeData = personDataList[activePersonIndex];
+
+                // [모드 2] 측정불가(또는 수정) 항목 입력 중
+                if (correctionTargetIndex !== -1) {
+                    tempPoints.push({ x: realX, y: realY });
+
+                    if (tempPoints.length === 3) {
+                        let finalPoints = [...tempPoints];
+                        let angle = 0;
+
+                        // [핵심 수정] 허리(Index 1)인 경우: 수직선 기준 로직 강제 적용
+                        if (correctionTargetIndex === 1) {
+                            // 사용자가 찍은 순서: [0]어깨 -> [1]골반 -> [2]무시
+                            const p_shoulder = tempPoints[0];
+                            const p_hip = tempPoints[1];
+
+                            // 골반 위로 수직 점 생성
+                            const dist = Math.hypot(p_shoulder.x - p_hip.x, p_shoulder.y - p_hip.y);
+                            const p_vert = { x: p_hip.x, y: p_hip.y - dist };
+
+                            // 데이터 구조: [수직점, 골반, 어깨]
+                            finalPoints = [p_vert, p_hip, p_shoulder];
+
+                            // 각도 계산 (수직선-골반-어깨)
+                            angle = calculateAngle(p_vert, p_hip, p_shoulder);
+
+                            // 허리는 0도 기준이므로 180도 보정 없음 (그대로 사용)
+                        }
+                        else {
+                            // 나머지 부위 (목, 팔, 다리 등)
+                            angle = calculateAngle(...tempPoints);
+                            // 180도 보정 적용
+                            if (INVERTED_ANGLES.includes(correctionTargetIndex)) {
+                                angle = 180 - angle;
+                            }
+                        }
+
+                        activeData.angles[correctionTargetIndex] = { points: finalPoints, angle: angle };
+
+                        if (window.syncPointsToRawPose) {
+                            window.syncPointsToRawPose(activeData, correctionTargetIndex, finalPoints);
+                        }
+
+                        selectedAngleIndex = correctionTargetIndex;
+                        correctionTargetIndex = -1;
+                        tempPoints = [];
+                        statusMsg.textContent = "입력 완료.";
+                    }
+                    drawAll();
+                    return;
+                }
+
+                // 포인트 드래그 (Lock 적용: 선택된게 있으면 그것만, 없으면 전체)
+                let checkTargets = [];
+                if (selectedAngleIndex !== -1) checkTargets = [selectedAngleIndex];
+                else {
+                    for (let i = 0; i < BODY_PARTS.length; i++) if (activeData.angles[i]) checkTargets.push(i);
+                    for (let i = 0; i < activeData.manualAngles.length; i++) checkTargets.push(i + BODY_PARTS.length);
+                }
+
+                for (let idx of checkTargets) {
+                    let data = (idx < BODY_PARTS.length) ? activeData.angles[idx] : activeData.manualAngles[idx - BODY_PARTS.length];
+                    if (!data) continue;
+                    for (let j = 0; j < 3; j++) {
+
+                        // ✅ 목(0)의 points[2]는 허리 연장선 기준점(pRef)이므로 드래그 차단
+                        if (idx === 0 && j === 2) continue;
+
+                        if (Math.hypot(data.points[j].x - realX, data.points[j].y - realY) < 15 / (imgScale * viewZoom)) {
+                            draggingPoint = { globalIndex: idx, pointIndex: j };
+                            selectedAngleIndex = idx; drawAll(); return;
+                        }
+                    }
+                }
+
+                // 사람 선택 변경 (선택된 각도가 없을 때만)
+                if (selectedAngleIndex === -1 && correctionTargetIndex === -1) {
+                    for (let i = 0; i < personDataList.length; i++) {
+                        if (i === activePersonIndex) continue;
+                        const pData = personDataList[i];
+                        let allPts = [];
+                        if (pData.rawPose) allPts = pData.rawPose.keypoints;
+                        else {
+                            pData.angles.forEach(a => { if (a) allPts.push(...a.points); });
+                            pData.manualAngles.forEach(a => { if (a) allPts.push(...a.points); });
+                        }
+                        if (allPts.length > 0) {
+                            const xs = allPts.map(p => p.x); const ys = allPts.map(p => p.y);
+                            if (realX >= Math.min(...xs) - 20 && realX <= Math.max(...xs) + 20 &&
+                                realY >= Math.min(...ys) - 20 && realY <= Math.max(...ys) + 20) {
+                                activePersonIndex = i; drawAll(); return;
+                            }
+                        }
+                    }
+                }
+
+                // 각도 선택 해제
+                if (selectedAngleIndex !== -1) { selectedAngleIndex = -1; drawAll(); return; }
+
+                drawAll();
+            });
+
+            // [기존 코드에서 이 부분을 찾아 교체해주세요]
+            canvas.addEventListener('mousemove', function (e) {
+                if (isPanning) {
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    viewPanX += (e.clientX - panStart.x) * scaleX;
+                    viewPanY += (e.clientY - panStart.y) * scaleY;
+                    panStart = { x: e.clientX, y: e.clientY };
+                    canvas.style.cursor = 'move';
+                    requestDraw();
+                    return; // 패닝 중엔 드래그 로직 실행 불필요
+                }
+
+                const { realX, realY, canvasX, canvasY } = getMousePos(e);
+
+                if (isAddingMode && selectionStart) {
+                    selectionRect = { x: Math.min(selectionStart.x, canvasX), y: Math.min(selectionStart.y, canvasY), w: Math.abs(canvasX - selectionStart.x), h: Math.abs(canvasY - selectionStart.y) };
+                    drawAll(); return;
+                }
+
+                let cursor = isAddingMode ? 'crosshair' : 'default';
+                if (correctionTargetIndex !== -1 || (extraTempPoints && extraTempPoints.length > 0)) cursor = 'crosshair';
+
+                if (draggingPoint) {
+                    const { globalIndex, pointIndex } = draggingPoint;
+                    const activeData = personDataList[activePersonIndex];
+                    let data = (globalIndex < BODY_PARTS.length) ? activeData.angles[globalIndex] : activeData.manualAngles[globalIndex - BODY_PARTS.length];
+
+                    // 1. 점 위치 이동
+                    data.points[pointIndex] = { x: realX, y: realY };
+
+                    // [허리 보정] 골반(1) 움직이면 수직기준점(0)도 따라가서 수직 유지
+                    if (globalIndex === 1) {
+                        if (pointIndex === 1) {
+                            data.points[0].x = data.points[1].x;
+                            data.points[0].y = data.points[1].y - 100;
+                        } else if (pointIndex === 0) {
+                            data.points[0].x = data.points[1].x;
+                        }
+                    }
+
+                    // 2. 각도 재계산
+                    let newAngle = calculateAngle(data.points[0], data.points[1], data.points[2]);
+
+                    // 3. 방향 판별
+                    let isFacingRight = true;
+                    if (activeData.rawPose) {
+                        const k = activeData.rawPose.keypoints;
+                        const leftScore = (k[5].score + k[7].score + k[11].score) / 3;
+                        const rightScore = (k[6].score + k[8].score + k[12].score) / 3;
+                        isFacingRight = rightScore > leftScore;
+                    }
+
+                    // 4. 부위별 특수 로직 (180도 반전 및 젖힘 처리)
+                    if (globalIndex < BODY_PARTS.length) {
+                        // INVERTED_ANGLES에 1이 없으므로 조건 단순화
+                        // 손목(4,8), 다리(5,9) → 180도 보정 (목은 제외됨)
+                        if (INVERTED_ANGLES.includes(globalIndex)) {
+                            newAngle = 180 - newAngle;
+                        }
+                        // 목(0) 전용: pRef 방식 → 180- 없이 젖힘 부호만 처리
+                        if (globalIndex === 0) {
+                            const ear = data.points[0];
+                            const shoulder = data.points[1];
+                            const pRef = data.points[2]; // 저장된 허리 연장선 기준점
+
+                            // pRef - shoulder = 허리 연장선 방향 벡터
+                            const tdx = pRef.x - shoulder.x;
+                            const tdy = pRef.y - shoulder.y;
+
+                            // 귀가 연장선의 뒤쪽이면 젖힘
+                            const cross = tdx * (ear.y - shoulder.y) - tdy * (ear.x - shoulder.x);
+                            const isNeckExt = isFacingRight ? cross < 0 : cross > 0;
+                            if (isNeckExt) newAngle = -newAngle;
+                        }
+                        // 허리(1): 정면 양측이면 젖힘 판단 생략, 단측이면 기존 로직
+                        if (globalIndex === 1) {
+                            const hip = data.points[1];
+                            const shoulder = data.points[2];
+                            let isTrunkExt = isFacingRight ? shoulder.x < hip.x : shoulder.x > hip.x;
+                            if (isTrunkExt) newAngle = -newAngle;
+                        }
+                    }
+
+                    data.angle = newAngle;
+
+                    if (globalIndex < BODY_PARTS.length && window.syncPointsToRawPose) {
+                        window.syncPointsToRawPose(activeData, globalIndex, data.points);
+                    }
+
+                    requestDraw(); cursor = 'grabbing';
+                }
+                canvas.style.cursor = cursor;
+            });
+
+            canvas.addEventListener('mouseup', function (e) {
+                if (e.button === 2) {
+                    isPanning = false;
+                    return;
+                }
+
+                if (isAddingMode && selectionStart) {
+                    if (selectionRect && selectionRect.w > 20 && selectionRect.h > 20) analyzeRegion(selectionRect);
+                    isAddingMode = false; selectionStart = null; selectionRect = null;
+                    addPersonBtn.classList.remove('active'); addPersonBtn.textContent = "+ 사람 추가 (영역 드래그)";
+                    canvas.style.cursor = "default"; return;
+                }
+                draggingPoint = null;
+            });
+
+            // ── 휠 줌 ────────────────────────────────────────────────────
+            canvas.addEventListener('wheel', function (e) {
+                e.preventDefault();
+                const { canvasX, canvasY } = getMousePos(e);
+
+                const ZOOM_STEP = 1.15;
+                const ZOOM_MAX = 8.0;
+                const zoomFactor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+                const newZoom = Math.min(ZOOM_MAX, Math.max(1.0, viewZoom * zoomFactor));
+
+                // 마우스 커서 위치를 기준으로 줌 (커서 아래 픽셀이 고정되도록)
+                const baseX = (canvasX - viewPanX) / viewZoom;
+                const baseY = (canvasY - viewPanY) / viewZoom;
+                viewPanX = canvasX - baseX * newZoom;
+                viewPanY = canvasY - baseY * newZoom;
+                viewZoom = newZoom;
+
+                // 줌이 1.0으로 돌아오면 패닝도 초기화
+                if (viewZoom <= 1.0) { viewPanX = 0; viewPanY = 0; }
+
+                requestDraw();
+            }, { passive: false });
+
+            // 우클릭 컨텍스트 메뉴 차단
+            canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+            // ── 더블클릭: 줌·패닝 초기화 ────────────────────────────────
+            canvas.addEventListener('dblclick', function () {
+                viewZoom = 1.0; viewPanX = 0; viewPanY = 0;
+                drawAll();
+            });
+
+            window.handleListClick = function (index) {
+                if (activePersonIndex === -1) return;
+                const activeData = personDataList[activePersonIndex];
+                if (index < BODY_PARTS.length) {
+                    if (activeData.angles[index]) { selectedAngleIndex = index; correctionTargetIndex = -1; tempPoints = []; }
+                    else { selectedAngleIndex = -1; correctionTargetIndex = index; tempPoints = []; statusMsg.textContent = "3점을 찍으세요."; }
+                } else { selectedAngleIndex = index; }
+                drawAll();
+            }
+
+            function getMousePos(e) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+                // 줌·패닝을 역산하여 실제 이미지 좌표로 변환
+                const realX = ((x - viewPanX) / viewZoom - imgOffsetX) / imgScale;
+                const realY = ((y - viewPanY) / viewZoom - imgOffsetY) / imgScale;
+                return { realX, realY, canvasX: x, canvasY: y };
+            }
+
+            document.addEventListener('keydown', (e) => {
+                if (activePersonIndex === -1) return;
+                const activeData = personDataList[activePersonIndex];
+                if (e.key === 'Delete' && selectedAngleIndex >= 0) {
+                    if (selectedAngleIndex < BODY_PARTS.length) activeData.angles[selectedAngleIndex] = null;
+                    else activeData.manualAngles.splice(selectedAngleIndex - BODY_PARTS.length, 1);
+                    selectedAngleIndex = -1; drawAll();
+                }
+            });
+
+            // [수정됨] 파일명에 날짜/시간 추가 및 하단 결과표 영역 자동 병합 저장
+            saveBtn.addEventListener('click', function () {
+                // 1. 임시로 캔버스의 높이를 아래쪽으로 늘려 결과표 공간 확보 (800x600 -> 800x820)
+                const originalHeight = canvas.height;
+                const extraHeight = 220;
+                canvas.height = originalHeight + extraHeight;
+
+                // 2. 전체 추출 모드로 다시 그리기 실행 (하단 결과 보고표 포함)
+                drawAll(true);
+
+                setTimeout(() => {
+                    // 3. 현재 날짜 및 시각 구하기 (형식: YYYYMMDD_HHMM)
+                    const now = new Date();
+                    const yyyy = now.getFullYear();
+                    const mm = String(now.getMonth() + 1).padStart(2, '0');
+                    const dd = String(now.getDate()).padStart(2, '0');
+                    const hh = String(now.getHours()).padStart(2, '0');
+                    const min = String(now.getMinutes()).padStart(2, '0');
+                    const timestamp = `${yyyy}${mm}${dd}_${hh}${min}`;
+
+                    // 4. 다운로드 링크 생성 및 실행
+                    const link = document.createElement('a');
+                    link.download = `전체작업자_자세분석_${timestamp}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+
+                    // 5. 작업 완료 후 원래 화면용 캔버스 크기(800x600)로 원복 및 재렌더링
+                    canvas.height = originalHeight;
+                    drawAll(false);
+                }, 50);
+            });
+
+            function calculateAngle(p1, p2, p3) {
+                const v1 = { x: p1.x - p2.x, y: p1.y - p2.y };
+                const v2 = { x: p3.x - p2.x, y: p3.y - p2.y };
+                const dot = v1.x * v2.x + v1.y * v2.y;
+                const mag1 = Math.sqrt(v1.x * v1.x + v1.y * v1.y);
+                const mag2 = Math.sqrt(v2.x * v2.x + v2.y * v2.y);
+                let angle = Math.acos(dot / (mag1 * mag2)) * (180 / Math.PI);
+                return isNaN(angle) ? 0 : angle;
+            }
+
+            // --- Draw Function ---
+            function drawAll(isExporting = false) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#eeeeee';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                if (img.src && img.width > 0) {
+                    ctx.drawImage(img, tx(0), ty(0), img.width * imgScale * viewZoom, img.height * imgScale * viewZoom);
+                } else { return; }
+
+                if (viewZoom > 1.01) {
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+                    ctx.beginPath();
+                    ctx.roundRect(8, 8, 165, 48, 6);
+                    ctx.fill();
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 14px Arial';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(`🔍 확대: ${viewZoom.toFixed(1)}x`, 16, 14);
+                    ctx.font = '11px Arial';
+                    ctx.fillStyle = '#aaaaaa';
+                    ctx.fillText('더블클릭: 초기화 | 우클릭드래그: 이동', 16, 34);
+                    ctx.textBaseline = 'alphabetic';
+                    ctx.restore();
+                }
+
+                // 1. 사람 박스 & 선택 UI (저장 모드일 땐 숨김)
+                if (!isExporting && personDataList.length > 0) {
+                    ctx.save();
+                    personDataList.forEach((person, idx) => {
+                        if (idx === activePersonIndex) return;
+
+                        let minX = 99999, maxX = -99999, minY = 99999, maxY = -99999;
+                        let hasPoints = false;
+                        if (person.rawPose) {
+                            // 화면 박스도 신뢰도 0.1 이상인 점들만 기준으로 크기를 잡도록 수정
+                            const validPoints = person.rawPose.keypoints.filter(k => k.score > 0.1);
+                            if (validPoints.length > 0) {
+                                const xs = validPoints.map(k => k.x);
+                                const ys = validPoints.map(k => k.y);
+                                minX = Math.min(...xs); maxX = Math.max(...xs);
+                                minY = Math.min(...ys); maxY = Math.max(...ys);
+                                hasPoints = true;
+                            }
+                        } else {
+                            let allPts = [];
+                            person.angles.forEach(a => { if (a) allPts.push(...a.points); });
+                            person.manualAngles.forEach(a => { if (a) allPts.push(...a.points); });
+                            if (allPts.length > 0) {
+                                const xs = allPts.map(p => p.x);
+                                const ys = allPts.map(p => p.y);
+                                minX = Math.min(...xs); maxX = Math.max(...xs);
+                                minY = Math.min(...ys); maxY = Math.max(...ys);
+                                hasPoints = true;
+                            }
+                        }
+
+                        if (hasPoints) {
+                            const x = tx(minX) - 10;
+                            const y = ty(minY) - 10;
+                            const w = (maxX - minX) * imgScale * viewZoom + 20;
+                            const h = (maxY - minY) * imgScale * viewZoom + 20;
+
+                            ctx.save();
+                            ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+                            ctx.strokeStyle = 'rgba(200, 200, 200, 0.4)'; ctx.lineWidth = 1;
+                            for (let i = -h; i < w; i += 10) {
+                                ctx.beginPath(); ctx.moveTo(x + i, y); ctx.lineTo(x + i + h + 50, y + h + 50); ctx.stroke();
+                            }
+                            ctx.restore();
+
+                            ctx.strokeStyle = 'rgba(100, 100, 100, 0.8)';
+                            ctx.setLineDash([4, 4]); ctx.lineWidth = 2;
+                            ctx.strokeRect(x, y, w, h);
+                            ctx.fillStyle = 'black'; ctx.font = 'bold 13px Arial';
+                            ctx.fillText(`👤 작업자 ${idx + 1} (클릭하여 선택)`, x, y - 5);
+                        }
+                    });
+                    ctx.restore();
+                }
+
+                if (isAddingMode && selectionRect) {
+                    ctx.strokeStyle = '#17a2b8'; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+                    ctx.strokeRect(selectionRect.x, selectionRect.y, selectionRect.w, selectionRect.h);
+                    ctx.setLineDash([]); ctx.fillStyle = 'rgba(23, 162, 184, 0.1)';
+                    ctx.fillRect(selectionRect.x, selectionRect.y, selectionRect.w, selectionRect.h);
+                }
+
+                angleDisplay.innerHTML = '';
+
+                const personsToDraw = isExporting
+                    ? personDataList.map((p, i) => ({ data: p, idx: i }))
+                    : (activePersonIndex !== -1 ? [{ data: personDataList[activePersonIndex], idx: activePersonIndex }] : []);
+
+                personsToDraw.forEach(pObj => {
+                    const pData = pObj.data;
+
+                    pData.angles.forEach((angleData, i) => {
+                        if (!angleData) return;
+                        // 양측 미감지 시 좌측 슬롯(6~9) 건너뜀
+                        // if (i >= 6 && i <= 8 && !pData.isBilateral.arms) return;
+                        // if (i === 9 && !pData.isBilateral.legs) return;
+                        drawAngle(angleData, getDisplayMeta(i, pData), isExporting, i);
+                    });
+
+                    pData.manualAngles.forEach((angleData, i) => {
+                        if (angleData) drawAngle(angleData, { label: angleData.label, color: angleData.color }, isExporting, i + BODY_PARTS.length);
+                    });
+                });
+
+                if (!isExporting && activePersonIndex !== -1) {
+                    const activeData = personDataList[activePersonIndex];
+                    const sel = selectedAngleIndex;
+                    const cor = correctionTargetIndex;
+
+                    // ── 목(0), 허리(1): 항상 단일 전체 행 ──
+                    renderListItem(activeData.angles[0], getDisplayMeta(0, activeData), 0, sel === 0, cor === 0);
+                    renderListItem(activeData.angles[1], getDisplayMeta(1, activeData), 1, sel === 1, cor === 1);
+
+                    // ── 팔/다리 통합 표 구조 (우측 결과 리스트 패널) ──
+                    angleDisplay.innerHTML += `
+                        <div style="display:flex; margin:15px 0 5px 0; border-bottom:1px solid #999; padding-bottom:5px;">
+                            <span style="flex:0.6; text-align:center; font-weight:bold; color:#333;">부위</span>
+                            <span style="flex:1; text-align:center; font-weight:bold; color:#555;">왼쪽</span>
+                            <span style="flex:1; text-align:center; font-weight:bold; color:#555;">오른쪽</span>
+                        </div>`;
+
+                    const tableRows = [
+                        { label: "윗팔", lIdx: 6, rIdx: 2 },
+                        { label: "아랫팔", lIdx: 7, rIdx: 3 },
+                        { label: "손목", lIdx: 8, rIdx: 4 },
+                        { label: "다리", lIdx: 9, rIdx: 5 }
+                    ];
+
+                    tableRows.forEach(row => {
+                        // 내부 헬퍼 함수: 색상 박스와 각도를 무조건 가로(Row) 한 줄로 나란히 렌더링
+                        const makeCell = (idx) => {
+                            const data = activeData.angles[idx];
+                            const meta = BODY_PARTS[idx];
+                            const isSelected = (sel === idx);
+                            const isTarget = (cor === idx);
+
+                            let content = "";
+                            if (!data) {
+                                content = `<span class="angle-color-box" style="background-color:${meta.color}; opacity:0.3; margin-right:6px; margin-bottom:0;"></span>
+                                           <span style="font-size:11px; color:#999;">${isTarget ? '입력 중...' : '[불가]'}</span>`;
+                            } else {
+                                const angleText = data.angle < 0 ? `${Math.abs(data.angle).toFixed(0)}°(젖힘)` : `${data.angle.toFixed(0)}°`;
+                                content = `<span class="angle-color-box" style="background-color:${meta.color}; margin-right:6px; margin-bottom:0;"></span>
+                                           <span style="font-size:14px;">${angleText}</span>`;
+                            }
+
+                            // justify-content: space-between 적용하여 양끝 정렬 (좌우 여백 10px 추가)
+                            return `
+                                <div class="angle-item ${isSelected ? 'active' : ''} ${!data ? 'missing' : ''}" 
+                                     style="display:flex; flex-direction:row; justify-content:space-between; align-items:center; border:none; padding:8px 10px; margin:0;"
+                                     onclick="handleListClick(${idx})">
+                                    ${content}
+                                </div>`;
+                        };
+
+                        // 부위 텍스트 우측에 border-right를 주어 손글씨 이미지의 세로 선 느낌 구현
+                        angleDisplay.innerHTML += `
+                            <div style="display:flex; align-items:stretch; border-bottom:1px solid #eee;">
+                                <span style="flex:0.6; display:flex; justify-content:center; align-items:center; font-weight:bold; font-size:14px; color:#333; border-right:1px solid #ccc;">${row.label}</span>
+                                <div style="flex:1; margin:0 2px;">
+                                    ${makeCell(row.lIdx)}
+                                </div>
+                                <div style="flex:1; margin:0 2px;">
+                                    ${makeCell(row.rIdx)}
+                                </div>
+                            </div>`;
+                    });
+
+                    // ── 수동 추가 항목 ──
+                    activeData.manualAngles.forEach((a, i) => {
+                        const mi = i + BODY_PARTS.length;
+                        renderListItem(a, { label: a.label, color: a.color }, mi, sel === mi, false);
+                    });
+                }
+
+                if (isExporting) {
+                    drawExportTable();
+                }
+
+                let currentTemp = tempPoints.length > 0 ? tempPoints : (extraTempPoints || []);
+                if (currentTemp.length > 0) {
+                    ctx.fillStyle = '#ff0000';
+                    currentTemp.forEach(p => { ctx.beginPath(); ctx.arc(tx(p.x), ty(p.y), 5, 0, 2 * Math.PI); ctx.fill(); });
+                    if (currentTemp.length > 1) {
+                        ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1; ctx.beginPath();
+                        ctx.moveTo(tx(currentTemp[0].x), ty(currentTemp[0].y));
+                        for (let k = 1; k < currentTemp.length; k++) ctx.lineTo(tx(currentTemp[k].x), ty(currentTemp[k].y));
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // [수정된 그리기 함수] Focus Mode 로직 추가
+            // [수정됨] 음수 각도일 때 '(젖힘)' 텍스트 표시 로직 추가
+            function drawAngle(data, meta, isExporting, index) {
+                const { points, angle } = data;
+
+                let drawColor = meta.color;
+                let lineWidth = 3;
+                let fontSize = 14;
+                let pointSize = 5;
+
+                // Focus Mode
+                if (!isExporting && selectedAngleIndex !== -1) {
+                    if (index === selectedAngleIndex) {
+                        lineWidth = 5; pointSize = 7; fontSize = 16;
+                    } else {
+                        drawColor = 'rgba(200, 200, 200, 0.4)';
+                        lineWidth = 1; pointSize = 3; fontSize = 10;
+                    }
+                }
+
+                ctx.lineWidth = lineWidth;
+                ctx.strokeStyle = drawColor;
+                ctx.beginPath();
+
+                // [허리] 골반-어깨만 그림 (수직선 숨김)
+                if (index === 1) {
+                    ctx.moveTo(tx(points[1].x), ty(points[1].y));
+                    ctx.lineTo(tx(points[2].x), ty(points[2].y));
+                } else {
+                    // [나머지] 3점 연결
+                    ctx.moveTo(tx(points[0].x), ty(points[0].y));
+                    ctx.lineTo(tx(points[1].x), ty(points[1].y));
+                    ctx.lineTo(tx(points[2].x), ty(points[2].y));
+                }
+                ctx.stroke();
+
+                points.forEach((p, pIdx) => {
+                    // [허리] 수직점 숨김
+                    if (index === 1 && pIdx === 0) return;
+
+                    ctx.beginPath();
+                    ctx.arc(tx(p.x), ty(p.y), pointSize, 0, 2 * Math.PI);
+                    ctx.fillStyle = drawColor; ctx.fill();
+                    if (drawColor === meta.color) { ctx.strokeStyle = 'white'; ctx.lineWidth = 1; ctx.stroke(); }
+                });
+
+                const midX = points[1].x;
+                const midY = points[1].y - (20 / imgScale);
+
+                // [텍스트 포맷팅 핵심]
+                let angleText = "";
+                if (angle < 0) {
+                    angleText = `${Math.abs(angle).toFixed(0)}° (젖힘)`;
+                } else {
+                    angleText = `${angle.toFixed(0)}°`;
+                }
+
+                ctx.font = `bold ${fontSize}px Arial`;
+                if (drawColor === meta.color) {
+                    ctx.strokeStyle = 'black'; ctx.lineWidth = 3;
+                    ctx.strokeText(`${meta.label} ${angleText}`, tx(midX), ty(midY));
+                }
+                ctx.fillStyle = drawColor;
+                ctx.fillText(`${meta.label} ${angleText}`, tx(midX), ty(midY));
+            }
+
+            function buildAngleItemHtml(data, meta, index, isSelected, isTarget, compact = false) {
+                const compactClass = compact ? 'compact' : '';
+
+                let yawText = "";
+                if (!compact && (index === 0 || index === 1)) {
+                    const activeData = personDataList[activePersonIndex];
+                    if (activeData) {
+                        const yawVal = (index === 0) ? (activeData.neckYaw || 0) : (activeData.trunkYaw || 0);
+                        if (yawVal !== 0) {
+
+                            // 🌟 [최종 보완] 3D 로직과 동일하게 전문가 입력 데이터를 최우선으로 방향 판별
+                            let isFacingRight = true;
+                            const rightLeg = !!activeData.angles[5];
+                            const leftLeg = !!activeData.angles[9];
+                            const rightArm = !!activeData.angles[2] || !!activeData.angles[3];
+                            const leftArm = !!activeData.angles[6] || !!activeData.angles[7];
+
+                            if (leftLeg && !rightLeg) isFacingRight = false;
+                            else if (rightLeg && !leftLeg) isFacingRight = true;
+                            else if (leftArm && !rightArm) isFacingRight = false;
+                            else if (rightArm && !leftArm) isFacingRight = true;
+                            else if (activeData.rawPose) {
+                                // 수동 입력이 양쪽 다 있거나 없을 때만 AI 신뢰도 점수로 판별
+                                const k = activeData.rawPose.keypoints;
+                                const leftScore = (k[5].score + k[7].score + k[11].score) / 3;
+                                const rightScore = (k[6].score + k[8].score + k[12].score) / 3;
+                                isFacingRight = rightScore >= leftScore;
+                            }
+
+                            // 방향에 따른 해부학적 좌/우 반전 처리
+                            const isAnatomicalRight = isFacingRight ? (yawVal > 0) : (yawVal < 0);
+                            const direction = isAnatomicalRight ? "오른쪽" : "왼쪽";
+
+                            yawText = `<span style="font-size:12px; color:#6f42c1; font-weight:normal; margin-left:8px;">(비틀림: ${Math.abs(yawVal).toFixed(0)}°, ${direction})</span>`;
+                        } else {
+                            yawText = `<span style="font-size:12px; color:#6f42c1; font-weight:normal; margin-left:8px;">(비틀림: 0°)</span>`;
+                        }
+                    }
+                }
+
+                if (!data) {
+                    return `
+          <div class="angle-item missing ${isTarget ? 'active' : ''} ${compactClass}"
+               onclick="handleListClick(${index})">
+            <span class="angle-name-group">
+              <span class="angle-color-box"
+                    style="background-color:${meta.color}; opacity:0.3"></span>
+              ${meta.label}
+            </span>
+            <span style="font-size:11px">${isTarget ? '입력 중...' : '[측정불가]'}${yawText}</span>
+          </div>`;
+                }
+                const angleText = data.angle < 0
+                    ? `${Math.abs(data.angle).toFixed(0)}°(젖힘)`
+                    : `${data.angle.toFixed(0)}°`;
+                return `
+      <div class="angle-item ${isSelected ? 'active' : ''} ${compactClass}"
+           onclick="handleListClick(${index})">
+        <span class="angle-name-group">
+          <span class="angle-color-box"
+                style="background-color:${meta.color}"></span>
+          ${meta.label}
+        </span>
+        <span>${angleText}${yawText}</span> </div>`;
+            }
+
+            // 기존처럼 바로 angleDisplay에 추가하는 래퍼 (단일 행용)
+            function renderListItem(data, meta, index, isSelected, isTarget) {
+                angleDisplay.innerHTML += buildAngleItemHtml(data, meta, index, isSelected, isTarget, false);
+            }
+
+            // [신규 추가] 저장용 이미지 하단에 깔끔한 격자형 결과 수치 표를 그려주는 함수
+            function drawExportTable() {
+                const tableTop = 600;
+                const extraHeight = 220;
+
+                // 1. 하단 공간을 흰색 배경으로 채우기
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, tableTop, 800, extraHeight);
+
+                // 2. 상단 경계선 긋기
+                ctx.strokeStyle = '#333333';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.moveTo(0, tableTop);
+                ctx.lineTo(800, tableTop);
+                ctx.stroke();
+
+                // 3. 표 전체 대제목 작성
+                ctx.fillStyle = '#111111';
+                ctx.font = 'bold 14px Arial';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                ctx.fillText('📋 신체 부위별 자동 자세 분석 결과 보고표', 20, tableTop + 15);
+
+                // 4. 감지된 각 작업자별로 격자 표 생성 (최대 3명까지 가로로 나란히 배치)
+                personDataList.forEach((person, pIdx) => {
+                    const tableX = 20 + pIdx * 255;
+                    if (tableX + 240 > 800) return; // 캔버스 가로 범위 초과 방지
+
+                    const boxY = tableTop + 45;
+                    const rowHeight = 20;
+
+                    // 작업자 타이틀 바 (신뢰감을 주는 인디고 블루 색상)
+                    ctx.fillStyle = '#4F46E5';
+                    ctx.fillRect(tableX, boxY, 240, rowHeight);
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 11px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`👤 작업자 ${pIdx + 1}`, tableX + 120, boxY + 4);
+
+                    // 내부 헤더 행 (부위 | 왼쪽 | 오른쪽)
+                    ctx.fillStyle = '#F3F4F6';
+                    ctx.fillRect(tableX, boxY + rowHeight, 240, rowHeight);
+                    ctx.strokeStyle = '#D1D5DB';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(tableX, boxY + rowHeight, 240, rowHeight);
+
+                    ctx.fillStyle = '#374151';
+                    ctx.font = 'bold 11px Arial';
+                    ctx.fillText('부위', tableX + 30, boxY + rowHeight + 4);
+                    ctx.fillText('왼쪽', tableX + 105, boxY + rowHeight + 4);
+                    ctx.fillText('오른쪽', tableX + 185, boxY + rowHeight + 4);
+
+                    // 행 데이터 정의 (라벨 및 매핑 인덱스)
+                    const displayRows = [
+                        { label: '목', idxL: 0, idxR: 0, single: true },
+                        { label: '허리', idxL: 1, idxR: 1, single: true },
+                        { label: '윗팔', idxL: 6, idxR: 2, single: false },
+                        { label: '아랫팔', idxL: 7, idxR: 3, single: false },
+                        { label: '손목', idxL: 8, idxR: 4, single: false },
+                        { label: '다리', idxL: 9, idxR: 5, single: false }
+                    ];
+
+                    // 각 데이터 열 그리기
+                    displayRows.forEach((row, rIdx) => {
+                        const rowY = boxY + (rowHeight * (2 + rIdx));
+
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(tableX, rowY, 240, rowHeight);
+                        ctx.strokeStyle = '#E5E7EB';
+                        ctx.strokeRect(tableX, rowY, 240, rowHeight);
+
+                        ctx.fillStyle = '#374151';
+                        ctx.font = '11px Arial';
+                        ctx.fillText(row.label, tableX + 30, rowY + 4);
+
+                        // 데이터 문자열 파싱 헬퍼
+                        const getValText = (idx) => {
+                            const d = person.angles[idx];
+                            if (!d) return '[불가]';
+                            return d.angle < 0 ? `${Math.abs(d.angle).toFixed(0)}°(젖힘)` : `${d.angle.toFixed(0)}°`;
+                        };
+
+                        if (row.single) {
+                            // 목, 허리는 단일 값이므로 중앙에 병합된 것처럼 표시
+                            ctx.fillStyle = '#111827';
+                            ctx.font = 'bold 11px Arial';
+                            ctx.fillText(getValText(row.idxR), tableX + 145, rowY + 4);
+
+                            ctx.strokeStyle = '#E5E7EB';
+                            ctx.beginPath();
+                            ctx.moveTo(tableX + 60, rowY); ctx.lineTo(tableX + 60, rowY + rowHeight);
+                            ctx.stroke();
+                        } else {
+                            // 양측 데이터 (좌/우 구분하여 매핑)
+                            ctx.fillStyle = '#111827';
+                            ctx.fillText(getValText(row.idxL), tableX + 105, rowY + 4);
+                            ctx.fillText(getValText(row.idxR), tableX + 185, rowY + 4);
+
+                            ctx.strokeStyle = '#E5E7EB';
+                            ctx.beginPath();
+                            ctx.moveTo(tableX + 60, rowY); ctx.lineTo(tableX + 60, rowY + rowHeight);
+                            ctx.moveTo(tableX + 150, rowY); ctx.lineTo(tableX + 150, rowY + rowHeight);
+                            ctx.stroke();
+                        }
+                    });
+
+                    // 테이블 전체 외곽선 마감 치기
+                    ctx.strokeStyle = '#9CA3AF';
+                    ctx.strokeRect(tableX, boxY, 240, rowHeight * 8);
+                });
+
+                // 5. 사용 후 캔버스 텍스트 정렬 상태 초기화 원복
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'alphabetic';
+            }
+
+            // [신규] 가장 왼쪽 점이 아닌 '몸통의 중심 좌표'를 기준으로 사람의 위치를 판단
+            function getPersonCenterX(person) {
+                if (person.rawPose) {
+                    const k = person.rawPose.keypoints;
+                    // 몸통 핵심 부위: 양어깨(5,6), 양골반(11,12)
+                    const coreIndices = [5, 6, 11, 12];
+                    let coreXs = [];
+
+                    coreIndices.forEach(idx => {
+                        if (k[idx].score > 0.2) { // 신뢰도 0.2 이상인 몸통 관절만 수집
+                            coreXs.push(k[idx].x);
+                        }
+                    });
+
+                    // 1순위: 어깨와 골반 좌표의 평균값(중심점) 반환
+                    if (coreXs.length > 0) {
+                        return coreXs.reduce((a, b) => a + b, 0) / coreXs.length;
+                    }
+
+                    // 2순위: 몸통이 가려져 안 보인다면, 인식된 전체 관절의 평균 X 좌표 사용
+                    const validPoints = k.filter(pt => pt.score > 0.2);
+                    if (validPoints.length > 0) {
+                        return validPoints.reduce((acc, pt) => acc + pt.x, 0) / validPoints.length;
+                    }
+                }
+
+                // 3순위: 수동 입력으로 추가된 사람일 경우
+                let xs = [];
+                person.angles.forEach(a => { if (a) a.points.forEach(p => xs.push(p.x)); });
+                person.manualAngles.forEach(a => { if (a) a.points.forEach(p => xs.push(p.x)); });
+
+                if (xs.length > 0) {
+                    return xs.reduce((a, b) => a + b, 0) / xs.length;
+                }
+
+                return 99999;
+            }
+
+            // 실제 이미지 좌표 → 현재 뷰(줌+패닝) 기준 canvas 좌표
+            function tx(x) { return (x * imgScale + imgOffsetX) * viewZoom + viewPanX; }
+            function ty(y) { return (y * imgScale + imgOffsetY) * viewZoom + viewPanY; }
+
+            // ─── 편집 상태 관리를 위한 전역 변수 ───
+            let currentEditSessionId = null; // null이면 '새로 만들기', 값이 있으면 '수정(업데이트)'
+
+            // ─── 1. DB에서 리스트 불러와서 썸네일 그리기 ───
+            async function loadGallery() {
+                const gallery = document.getElementById('galleryContainer');
+                try {
+                    const querySnapshot = await window.fsGetDocs(window.fsCollection(window.fbDb, "sessions"));
+                    gallery.innerHTML = '';
+
+                    if (querySnapshot.empty) {
+                        gallery.innerHTML = '<p style="color:#666; font-size:13px;">저장된 작업 내역이 없습니다.</p>';
+                        return;
+                    }
+
+                    querySnapshot.forEach((doc) => {
+                        const data = doc.data();
+                        const sessionId = doc.id;
+
+                        const card = document.createElement('div');
+                        card.className = 'thumb-card';
+                        card.innerHTML = `
+                            <button class="btn-delete-thumb" title="삭제">X</button>
+                            <img src="${data.exportImageData}" alt="썸네일" title="현장: ${data.siteName || '미지정'}" />
+                        `;
+
+                        card.querySelector('img').addEventListener('click', () => loadSessionForEdit(sessionId, data));
+                        card.querySelector('.btn-delete-thumb').addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            deleteSession(sessionId);
+                        });
+
+                        gallery.appendChild(card);
+                    });
+                } catch (error) {
+                    console.error("갤러리 로드 에러:", error);
+                    gallery.innerHTML = '<p style="color:red;">데이터를 불러오는데 실패했습니다.</p>';
+                }
+            }
+
+            // ─── 2. 썸네일 클릭 시 불러오기 ───
+            function loadSessionForEdit(sessionId, data) {
+                statusMsg.textContent = "데이터 불러오는 중...";
+                statusMsg.style.color = "#e67e22";
+
+                currentEditSessionId = sessionId;
+                // 👇 현장명 입력란에 데이터 채워주기 복구
+                document.getElementById('siteName').value = data.siteName || '';
+                document.getElementById('saveDbBtn').textContent = "클라우드(DB) 업데이트";
+
+                img = new Image();
+                img.onload = function () {
+                    viewZoom = 1.0; viewPanX = 0; viewPanY = 0;
+                    calculateImageScale();
+                    personDataList = JSON.parse(data.personDataList);
+                    activePersonIndex = personDataList.length > 0 ? 0 : -1;
+                    originalImageDataUrl = data.originalImageData;
+
+                    drawAll();
+                    statusMsg.textContent = "불러오기 완료. 수정 가능합니다.";
+                    statusMsg.style.color = "#28a745";
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                };
+                img.src = data.originalImageData;
+            }
+
+            // ─── 3. 삭제 기능 (DB 전용) ───
+            async function deleteSession(sessionId) {
+                if (!confirm("정말 이 작업 내역을 삭제하시겠습니까?\n(데이터베이스에서 영구 삭제됩니다)")) return;
+
+                const fileBtn = document.getElementById('customFileBtn');
+                const saveBtn = document.getElementById('saveDbBtn');
+
+                try {
+                    // 🔒 1. UI 잠금 및 시각적 피드백 (반투명)
+                    if (fileBtn) fileBtn.disabled = true;
+                    if (saveBtn) saveBtn.disabled = true;
+                    canvas.style.pointerEvents = "none";
+                    canvas.style.opacity = "0.5";
+                    statusMsg.textContent = "DB 삭제 처리 중...";
+                    statusMsg.style.color = "#e67e22";
+
+                    await window.fsDeleteDoc(window.fsDoc(window.fbDb, "sessions", sessionId));
+
+                    if (currentEditSessionId === sessionId) {
+                        currentEditSessionId = null;
+                        const siteNameInput = document.getElementById('siteName');
+                        if (siteNameInput) siteNameInput.value = '';
+                        if (saveBtn) saveBtn.textContent = "클라우드(DB)에 저장";
+                        resetData();
+                        img = new Image();
+                        drawAll();
+                    }
+
+                    // 💡 핵심: 갤러리를 완전히 다시 그릴 때까지 기다림
+                    await loadGallery();
+
+                    statusMsg.textContent = "삭제 완료";
+                    statusMsg.style.color = "#28a745";
+                } catch (error) {
+                    console.error("삭제 오류:", error);
+                    alert("삭제 중 오류가 발생했습니다.");
+                    statusMsg.textContent = "삭제 실패";
+                    statusMsg.style.color = "#e74c3c";
+                } finally {
+                    // 🔓 2. UI 잠금 해제 (원상 복구)
+                    if (fileBtn) fileBtn.disabled = false;
+                    if (saveBtn) saveBtn.disabled = false;
+                    canvas.style.pointerEvents = "auto";
+                    canvas.style.opacity = "1";
+                }
+            }
+
+            // ─── 4. DB 저장 이벤트 (현장명 포함) ───
+            document.getElementById('saveDbBtn').addEventListener('click', async function () {
+                if (!originalImageDataUrl || personDataList.length === 0) {
+                    alert("업로드된 이미지가 없거나 분석된 데이터가 없습니다.");
+                    return;
+                }
+
+                const siteName = document.getElementById('siteName').value.trim() || "미지정 현장";
+                const now = new Date();
+                const timestamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+
+                const isUpdating = (currentEditSessionId !== null);
+                const sessionId = isUpdating ? currentEditSessionId : `session_${timestamp}`;
+
+                const fileBtn = document.getElementById('customFileBtn');
+
+                try {
+                    // 🔒 1. UI 잠금 (중복 클릭 및 파일 로드 방지)
+                    this.disabled = true;
+                    if (fileBtn) fileBtn.disabled = true;
+                    canvas.style.pointerEvents = "none";
+                    canvas.style.opacity = "0.5";
+
+                    statusMsg.textContent = isUpdating ? "DB 업데이트 중..." : "클라우드(DB) 저장 중...";
+                    statusMsg.style.color = "#007BFF";
+
+                    const originalHeight = canvas.height;
+                    const extraHeight = 220;
+                    canvas.height = originalHeight + extraHeight;
+                    drawAll(true);
+                    const rawExportDataUrl = canvas.toDataURL('image/png');
+                    canvas.height = originalHeight;
+                    drawAll(false);
+
+                    statusMsg.textContent = "이미지 최적화 압축 중...";
+                    const compressedOriginal = await compressImage(originalImageDataUrl, 1000, 0.6);
+                    const compressedExport = await compressImage(rawExportDataUrl, 1000, 0.6);
+
+                    statusMsg.textContent = "DB 전송 중...";
+                    const cleanPersonData = JSON.parse(JSON.stringify(personDataList));
+                    const docRef = window.fsDoc(window.fbDb, "sessions", sessionId);
+
+                    const payload = {
+                        siteName: siteName,
+                        personDataList: JSON.stringify(cleanPersonData),
+                        originalImageData: compressedOriginal,
+                        exportImageData: compressedExport
+                    };
+
+                    if (isUpdating) {
+                        payload.updatedAt = window.fsServerTimestamp();
+                        await window.fsUpdateDoc(docRef, payload);
+                        alert("성공적으로 업데이트 되었습니다.");
+                    } else {
+                        payload.createdAt = window.fsServerTimestamp();
+                        await window.fsSetDoc(docRef, payload);
+                        alert("새 데이터가 DB에 저장 완료되었습니다!");
+                    }
+
+                    statusMsg.textContent = "저장 완료";
+                    statusMsg.style.color = "#28a745";
+
+                    currentEditSessionId = sessionId;
+                    this.textContent = "클라우드(DB) 업데이트";
+
+                    // 💡 저장 후 갤러리 갱신 완료까지 대기
+                    await loadGallery();
+
+                } catch (error) {
+                    console.error("Firebase 저장 오류:", error);
+                    alert("용량이 너무 크거나 오류가 발생했습니다. 콘솔 창을 확인하세요.");
+                    statusMsg.textContent = "저장 실패";
+                    statusMsg.style.color = "#e74c3c";
+                } finally {
+                    // 🔓 2. UI 잠금 해제
+                    this.disabled = false;
+                    if (fileBtn) fileBtn.disabled = false;
+                    canvas.style.pointerEvents = "auto";
+                    canvas.style.opacity = "1";
+                }
+            });
+
+            // [신규 추가] Firestore 저장을 위해 이미지를 1MB 이하로 압축/축소하는 함수
+            function compressImage(imageSrc, maxWidth = 600, quality = 0.4) {
+                return new Promise((resolve) => {
+                    const imgToResize = new Image();
+                    imgToResize.src = imageSrc;
+                    imgToResize.onload = function () {
+                        const canvasResize = document.createElement('canvas');
+                        let width = imgToResize.width;
+                        let height = imgToResize.height;
+
+                        if (width > maxWidth) {
+                            height = Math.round((height * maxWidth) / width);
+                            width = maxWidth;
+                        }
+
+                        canvasResize.width = width;
+                        canvasResize.height = height;
+                        const ctxResize = canvasResize.getContext('2d');
+                        ctxResize.drawImage(imgToResize, 0, 0, width, height);
+
+                        // jpeg 포맷으로 화질을 압축하여 용량을 대폭 줄임
+                        resolve(canvasResize.toDataURL('image/jpeg', quality));
+                    };
+                });
+            }
+
+            function waitFirebase(cb, tries = 25) {
+                if (window.fbDb && window.fsGetDocs) { cb(); }
+                else if (tries > 0) { setTimeout(() => waitFirebase(cb, tries - 1), 200); }
+                else { console.warn("Firebase 초기화 타임아웃"); }
+            }
+            waitFirebase(loadGallery);
+
+            // ─── [신규 추가] DB 전체 데이터를 CSV로 추출 ───
+            document.getElementById('exportCsvBtn').addEventListener('click', async function () {
+                try {
+                    statusMsg.textContent = "CSV 데이터 추출 중...";
+                    const querySnapshot = await window.fsGetDocs(window.fsCollection(window.fbDb, "sessions"));
+
+                    if (querySnapshot.empty) {
+                        alert("추출할 데이터가 없습니다.");
+                        statusMsg.textContent = "추출할 데이터 없음";
+                        return;
+                    }
+
+                    // 엑셀에서 한글 깨짐 방지를 위한 UTF-8 BOM(\uFEFF) 삽입
+                    let csvContent = "\uFEFF";
+                    // CSV 헤더 작성
+                    csvContent += "현장명,저장일시,작업자,목,허리,윗팔(좌),윗팔(우),아랫팔(좌),아랫팔(우),손목(좌),손목(우),다리(좌),다리(우)\n";
+
+                    querySnapshot.forEach(doc => {
+                        const data = doc.data();
+                        // 엑셀 셀 나뉨 방지를 위해 현장명 내부의 쉼표(,)를 공백으로 치환
+                        const siteName = (data.siteName || "미지정").replace(/,/g, " ");
+                        const sessionTime = doc.id.replace('session_', ''); // 20260529_133021 형태
+
+                        let persons = [];
+                        try { persons = JSON.parse(data.personDataList); } catch (e) { }
+
+                        // 한 사진 내의 여러 작업자를 순회하며 각 행(Row) 생성
+                        persons.forEach((person, idx) => {
+                            // 각도 추출 헬퍼 함수 (값이 없으면 '-' 반환, 음수면 젖힘 표기)
+                            const getAngle = (partIdx) => {
+                                const d = person.angles[partIdx];
+                                if (!d) return "-";
+                                return d.angle < 0 ? `${Math.abs(d.angle).toFixed(0)}(젖힘)` : `${d.angle.toFixed(0)}`;
+                            };
+
+                            const row = [
+                                siteName,
+                                sessionTime,
+                                `작업자 ${idx + 1}`,
+                                getAngle(0), // 목
+                                getAngle(1), // 허리
+                                getAngle(6), // 윗팔(좌)
+                                getAngle(2), // 윗팔(우)
+                                getAngle(7), // 아랫팔(좌)
+                                getAngle(3), // 아랫팔(우)
+                                getAngle(8), // 손목(좌)
+                                getAngle(4), // 손목(우)
+                                getAngle(9), // 다리(좌)
+                                getAngle(5)  // 다리(우)
+                            ];
+
+                            csvContent += row.join(",") + "\n";
+                        });
+                    });
+
+                    // CSV 파일 생성 및 브라우저 다운로드 트리거
+                    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement("a");
+                    const url = URL.createObjectURL(blob);
+
+                    const now = new Date();
+                    const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+
+                    link.setAttribute("href", url);
+                    link.setAttribute("download", `자세분석_DB전체데이터_${dateStr}.csv`);
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+
+                    statusMsg.textContent = "CSV 추출 완료";
+                    statusMsg.style.color = "#28a745";
+
+                } catch (error) {
+                    console.error("CSV 추출 오류:", error);
+                    alert("CSV 데이터를 구성하는 중 오류가 발생했습니다.");
+                    statusMsg.textContent = "CSV 추출 실패";
+                    statusMsg.style.color = "#e74c3c";
+                }
+            });
+
+            // 👇 수정됨: 3D 모달을 열기 직전, 2D 패널의 데이터로 3D 뼈대를 완벽히 복원하는 함수
+            window.syncAll2DTo3D = function (person) {
+                if (!person || !person.rawPose || !person.angles) return;
+                const kps = person.rawPose.keypoints;
+
+                const updateKp = (idx, pt) => {
+                    if (idx >= 0 && idx < kps.length && pt) {
+                        kps[idx].x = pt.x;
+                        kps[idx].y = pt.y;
+                        kps[idx].score = 0.5; // 전문가가 확인한 점이므로 신뢰도 격상
+                    }
+                };
+
+                // 🌟 핵심 1: AI 점수 무시! 전문가가 right-panel에서 작업한 '다리/팔' 데이터를 기준으로 방향 판별
+                const rightLeg = !!person.angles[5];
+                const leftLeg = !!person.angles[9];
+                const rightArm = !!person.angles[2] || !!person.angles[3];
+                const leftArm = !!person.angles[6] || !!person.angles[7];
+
+                let isFacingRight = true;
+                if (leftLeg && !rightLeg) isFacingRight = false;
+                else if (rightLeg && !leftLeg) isFacingRight = true;
+                else if (leftArm && !rightArm) isFacingRight = false;
+                else if (rightArm && !leftArm) isFacingRight = true;
+                else {
+                    // 패널 정보가 부족할 때만 AI 원본 점수에 의존
+                    const lScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
+                    const rScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
+                    isFacingRight = rScore >= lScore;
+                }
+
+                // 2. 2D 패널의 좌표를 3D 뼈대(rawPose)로 역매핑
+                person.angles.forEach((data, idx) => {
+                    if (!data || !data.points) return;
+                    const pts = data.points;
+
+                    if (idx === 0) {
+                        const headIdx = kps[0].score > 0.1 ? 0 : (isFacingRight ? 4 : 3);
+                        updateKp(headIdx, pts[0]);
+                        if (!person.isBilateral.arms) updateKp(isFacingRight ? 6 : 5, pts[1]);
+                    } else if (idx === 1) {
+                        if (!person.isBilateral.legs) updateKp(isFacingRight ? 12 : 11, pts[1]);
+                        if (!person.isBilateral.arms) updateKp(isFacingRight ? 6 : 5, pts[2]);
+                    } else {
+                        const map = {
+                            2: [12, 6, 8], 3: [6, 8, 10], 4: [8, 10, 10], 5: [12, 14, 16],
+                            6: [11, 5, 7], 7: [5, 7, 9], 8: [7, 9, 9], 9: [11, 13, 15]
+                        };
+                        if (map[idx]) {
+                            map[idx].forEach((kIdx, i) => updateKp(kIdx, pts[i]));
+                        }
+                    }
+                });
+
+                // 🌟 핵심 2: 좌우 크로스(Criss-Cross) 현상 완벽 방지 섀도우 카피
+                const pairs = [[5, 6], [7, 8], [9, 10], [11, 12], [13, 14], [15, 16]];
+                pairs.forEach(([l, r]) => {
+                    const ptL = kps[l]; const ptR = kps[r];
+                    const leftValid = ptL && ptL.score >= 0.5;
+                    const rightValid = ptR && ptR.score >= 0.5;
+
+                    if (leftValid && !rightValid) {
+                        // 좌측만 전문가가 입력했다면, 우측을 좌측 뒤로 숨김 (3D에서 꼬임 방지)
+                        ptR.x = ptL.x; ptR.y = ptL.y; ptR.score = 0.15;
+                    } else if (!leftValid && rightValid) {
+                        // 우측만 전문가가 입력했다면, 좌측을 우측 뒤로 숨김
+                        ptL.x = ptR.x; ptL.y = ptR.y; ptL.score = 0.15;
+                    }
+                });
+            };
+
+            // ─── [신규 추가] 3D 모달 구동 및 비대칭(비틀림) 보정 로직 ───
+            let modalCamYaw = 0, modalTrunkYaw = 0, modalNeckYaw = 0;
+            let rotatedPoints3D = []; // 보정 후 좌표 임시 저장 배열
+            let selectedPointIndex3D = -1;
+            let currentScale3D = 1;
+            let baselineKps3D = null;      // 모달 열릴 때 kps 스냅샷
+            let openingCamYaw = 0;       // 모달 열릴 때의 camYaw 기준값
+            let openingTrunkYaw = 0;
+            let openingNeckYaw = 0;
+
+            const NON_SELECTABLE_JOINTS = [1, 2];
+
+            // BlazePose(33개) → MoveNet(17개) 인덱스 매핑표
+            const BLAZEPOSE_TO_MOVENET = {
+                0: 0,   // 코 → 코
+                7: 3,   // 왼쪽 귀 → 왼쪽 귀
+                8: 4,   // 오른쪽 귀 → 오른쪽 귀
+                11: 5,  // 왼쪽 어깨
+                12: 6,  // 오른쪽 어깨
+                13: 7,  // 왼쪽 팔꿈치
+                14: 8,  // 오른쪽 팔꿈치
+                15: 9,  // 왼쪽 손목
+                16: 10, // 오른쪽 손목
+                23: 11, // 왼쪽 골반
+                24: 12, // 오른쪽 골반
+                25: 13, // 왼쪽 무릎
+                26: 14, // 오른쪽 무릎
+                27: 15, // 왼쪽 발목
+                28: 16, // 오른쪽 발목
+            };
+
+            let detector3D = null; // BlazePose 전용 detector
+
+            // 👇 신규 추가: 관절 맵핑 및 미세조정 로직
+            const JOINT_NAMES = {
+                0: "얼굴(목) 중심", 1: "왼쪽 눈", 2: "오른쪽 눈", 3: "왼쪽 귀", 4: "오른쪽 귀",
+                5: "왼쪽 어깨", 6: "오른쪽 어깨", 7: "왼쪽 팔꿈치", 8: "오른쪽 팔꿈치",
+                9: "왼쪽 손목", 10: "오른쪽 손목", 11: "왼쪽 골반", 12: "오른쪽 골반",
+                13: "왼쪽 무릎", 14: "오른쪽 무릎", 15: "왼쪽 발목", 16: "오른쪽 발목"
+            };
+            let activeJointInitX = 0;
+            let activeJointInitY = 0;
+
+            function updateFineTunePanel(idx) {
+                const panel = document.getElementById('fineTunePanel');
+                panel.style.display = 'flex'; // 항상 표시
+
+                if (idx === -1) {
+                    document.getElementById('selectedJointName').innerText = '없음';
+                    return;
+                }
+                const kps = personDataList[activePersonIndex].rawPose.keypoints;
+                if (!kps[idx]) return;
+
+                document.getElementById('selectedJointName').innerText = JOINT_NAMES[idx] || `관절 ${idx}`;
+
+                activeJointInitX = kps[idx].x;
+                activeJointInitY = kps[idx].y;
+                const initZ = kps[idx].zOffset || 0;
+
+                ['X', 'Y'].forEach(axis => {
+                    document.getElementById(`fineTune${axis}`).value = 0;
+                    document.getElementById(`fineTune${axis}Val`).innerText = "0";
+                });
+                document.getElementById('fineTuneZ').value = initZ;
+                document.getElementById('fineTuneZVal').innerText = initZ;
+            }
+
+            // 배율 변경 시 슬라이더 전체 리셋 (혼선 방지)
+            document.querySelectorAll('input[name="ftScale"]').forEach(radio => {
+                radio.addEventListener('change', function () {
+                    ['X', 'Y', 'Z'].forEach(axis => {
+                        document.getElementById(`fineTune${axis}`).value = 0;
+                        document.getElementById(`fineTune${axis}Val`).innerText = '0';
+                    });
+                    // 리셋 시 현재 관절 위치를 새 기준점으로 갱신
+                    if (selectedPointIndex3D !== -1) {
+                        const kps = personDataList[activePersonIndex].rawPose.keypoints;
+                        activeJointInitX = kps[selectedPointIndex3D].x;
+                        activeJointInitY = kps[selectedPointIndex3D].y;
+                    }
+                });
+            });
+
+            ['X', 'Y', 'Z'].forEach(axis => {
+                document.getElementById(`fineTune${axis}`).addEventListener('input', function (e) {
+                    if (selectedPointIndex3D === -1) return;
+
+                    const sliderVal = parseInt(e.target.value);
+                    const scaleEl = document.querySelector('input[name="ftScale"]:checked');
+                    const scale = scaleEl ? parseInt(scaleEl.value) : 1;
+                    const actualOffset = sliderVal * scale; // 실제 픽셀 이동량
+
+                    // 표시값은 실제 이동량으로 보여줌
+                    document.getElementById(`fineTune${axis}Val`).innerText = actualOffset;
+
+                    const kps = personDataList[activePersonIndex].rawPose.keypoints;
+                    if (axis === 'X') kps[selectedPointIndex3D].x = activeJointInitX + actualOffset;
+                    if (axis === 'Y') kps[selectedPointIndex3D].y = activeJointInitY + actualOffset;
+                    if (axis === 'Z') kps[selectedPointIndex3D].zOffset = actualOffset;
+
+                    kps[selectedPointIndex3D].score = 1.0;
+                    render3DModal();
+                });
+            });
+
+
+            const open3DModalBtn = document.getElementById('open3DModalBtn');
+            if (open3DModalBtn) {
+                open3DModalBtn.addEventListener('click', function () {
+                    if (activePersonIndex === -1 || !personDataList[activePersonIndex].rawPose) {
+                        alert("보정할 작업자를 먼저 선택하거나 분석을 완료해주세요.");
+                        return;
+                    }
+
+                    const person = personDataList[activePersonIndex];
+
+                    // 👇 신규 추가: 3D 모달을 띄우기 직전에 2D(패널) 데이터를 가져와 AI가 놓친 3D 빈칸을 완벽히 채웁니다.
+                    if (window.syncAll2DTo3D) window.syncAll2DTo3D(person);
+
+                    document.getElementById('modal3D-overlay').style.display = 'block';
+                    document.getElementById('modal3D').style.display = 'block';
+
+                    // 1. 전체 시점 회전(카메라) 값 연속 연동
+                    modalCamYaw = person.camYaw || 0;
+                    document.getElementById('camYawSlider').value = modalCamYaw;
+                    document.getElementById('camYawValue').innerText = modalCamYaw + "°";
+
+                    // 2. 허리(몸통) 비틀림 값 연속 연동
+                    modalTrunkYaw = person.trunkYaw || 0;
+                    document.getElementById('trunkYawSlider').value = modalTrunkYaw;
+                    document.getElementById('trunkYawValue').innerText = modalTrunkYaw + "°";
+
+                    // 3. 목 비틀림 값 연속 연동
+                    modalNeckYaw = person.neckYaw || 0;
+                    document.getElementById('neckYawSlider').value = modalNeckYaw;
+                    document.getElementById('neckYawValue').innerText = modalNeckYaw + "°";
+
+                    selectedPointIndex3D = 6;
+                    updateFineTunePanel(6);
+
+                    openingCamYaw = person.camYaw || 0;
+                    openingTrunkYaw = person.trunkYaw || 0;
+                    openingNeckYaw = person.neckYaw || 0;
+                    baselineKps3D = JSON.parse(JSON.stringify(person.rawPose.keypoints));
+
+                    render3DModal();
+                });
+            }
+
+            window.close3DModal = function () {
+                document.getElementById('modal3D-overlay').style.display = 'none';
+                document.getElementById('modal3D').style.display = 'none';
+            };
+
+            // 슬라이더 이벤트 통합 바인딩
+            ['cam', 'trunk', 'neck'].forEach(type => {
+                document.getElementById(`${type}YawSlider`).addEventListener('input', function (e) {
+                    const val = parseInt(e.target.value);
+                    document.getElementById(`${type}YawValue`).innerText = val + "°";
+                    if (type === 'cam') modalCamYaw = val;
+                    if (type === 'trunk') modalTrunkYaw = val;
+                    if (type === 'neck') modalNeckYaw = val;
+                    render3DModal();
+                });
+            });
+
+            // 🌟 3D 스켈레톤 및 운동학(Kinematics) 체인 회전 적용 함수
+            function render3DModal() {
+                const canvas = document.getElementById('canvas3DModal');
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                const person = personDataList[activePersonIndex];
+                const kps = person.rawPose.keypoints;
+
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+
+                const lh = kps[11], rh = kps[12], ls = kps[5], rs = kps[6];
+                if (!lh || !rh || !ls || !rs) return;
+
+                const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+                const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+
+                const deltaCamYaw = modalCamYaw - openingCamYaw;
+                const deltaTrunkYaw = modalTrunkYaw - openingTrunkYaw;
+                const deltaNeckYaw = modalNeckYaw - openingNeckYaw;
+
+                const camRad = -(deltaCamYaw * Math.PI) / 180;
+                const trunkRad = -(deltaTrunkYaw * Math.PI) / 180;
+                const neckRad = -(deltaNeckYaw * Math.PI) / 180;
+
+                // 🌟 [수정 1] 2D 패널 상태를 기준으로 고정된(Baseline) 방향성 확립
+                const rightLeg = !!person.angles[5];
+                const leftLeg = !!person.angles[9];
+                const rightArm = !!person.angles[2] || !!person.angles[3];
+                const leftArm = !!person.angles[6] || !!person.angles[7];
+
+                let isRightCloserBaseline = true;
+                if (leftLeg && !rightLeg) isRightCloserBaseline = false;
+                else if (rightLeg && !leftLeg) isRightCloserBaseline = true;
+                else if (leftArm && !rightArm) isRightCloserBaseline = false;
+                else if (rightArm && !leftArm) isRightCloserBaseline = true;
+                else {
+                    // 🌟 [버그 수정 완료!] 양측이 모두 있을 경우, AI가 감지한 신뢰도(Score)로 앞뒤를 정확히 판별합니다.
+                    const lScore = (kps[5].score + kps[7].score + kps[11].score);
+                    const rScore = (kps[6].score + kps[8].score + kps[12].score);
+                    isRightCloserBaseline = rScore >= lScore;
+                }
+
+                const Z_DIR = -1;
+
+                let maxBone = 50;
+                const bones = [[11, 13], [12, 14], [5, 11], [6, 12]];
+                bones.forEach(b => {
+                    const p1 = kps[b[0]], p2 = kps[b[1]];
+                    if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
+                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                        if (dist > maxBone) maxBone = dist;
+                    }
+                });
+
+                const idealShoulderW = Math.max(maxBone * 0.8, 50);
+                const idealHipW = Math.max(maxBone * 0.6, 40);
+
+                const actualShoulderW = Math.abs(rs.x - ls.x);
+                const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
+                const dzS = dz2S > 0 ? Math.min(Math.sqrt(dz2S), maxBone * 0.5) : 0;
+
+                const actualHipW = Math.abs(rh.x - lh.x);
+                const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
+                const dzH = dz2H > 0 ? Math.min(Math.sqrt(dz2H), maxBone * 0.5) : 0;
+
+                const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
+
+                const zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
+
+                // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
+                const rawPoints = kps.map((pt, idx) => {
+                    const base = baselineKps3D ? baselineKps3D[idx] : pt;
+                    // 드래그로 변경된 양 = 현재 kps - baseline
+                    const dragDx = pt.x - (baselineKps3D ? baselineKps3D[idx].x : pt.x);
+                    const dragDy = pt.y - (baselineKps3D ? baselineKps3D[idx].y : pt.y);
+                    let x = base.x + dragDx; // baseline + drag offset
+                    let y = base.y + dragDy;
+                    let z = 0;
+
+                    // (기존 z 초기화 및 zOffset 적용 로직 그대로 유지)
+                    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;
+                    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder;
+                    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;
+                    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;
+                    if (idx === 0) z = 35 * Z_DIR;
+                    else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
+                    if (pt.zOffset !== undefined) z += pt.zOffset;
+
+                    let finalX = x, finalZ = z;
+
+                    // (기존 목·몸통·카메라 회전 로직 그대로 유지)
+                    if (idx <= 4) {
+                        let rx = finalX - shoulderMid.x;
+                        let rz = finalZ;
+                        finalX = rx * Math.cos(neckRad) - rz * Math.sin(neckRad) + shoulderMid.x;
+                        finalZ = rx * Math.sin(neckRad) + rz * Math.cos(neckRad);
+                    }
+                    if (idx <= 10) {
+                        let rx = finalX - pelvisMid.x;
+                        let rz = finalZ;
+                        finalX = rx * Math.cos(trunkRad) - rz * Math.sin(trunkRad) + pelvisMid.x;
+                        finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
+                    }
+                    let rx = finalX - pelvisMid.x;
+                    let rz = finalZ;
+                    finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
+                    finalZ = rx * Math.sin(camRad) + rz * Math.cos(camRad);
+
+                    return { rawX: finalX, rawY: y, z: finalZ, score: pt.score };
+                });
+
+                // ── 2단계: 유효 점들의 bounding box → 자동 스케일·센터링 ──
+                const PADDING = 50; // 캔버스 여백 (px)
+                const validPts = rawPoints.filter(p => p.score > 0.1);
+
+                let minRX = Infinity, maxRX = -Infinity, minRY = Infinity, maxRY = -Infinity;
+                validPts.forEach(p => {
+                    if (p.rawX < minRX) minRX = p.rawX;
+                    if (p.rawX > maxRX) maxRX = p.rawX;
+                    if (p.rawY < minRY) minRY = p.rawY;
+                    if (p.rawY > maxRY) maxRY = p.rawY;
+                });
+
+                const rangeX = (maxRX - minRX) || 1;
+                const rangeY = (maxRY - minRY) || 1;
+                const scale = Math.min(
+                    (canvas.width - PADDING * 2) / rangeX,
+                    (canvas.height - PADDING * 2) / rangeY
+                );
+                currentScale3D = scale;
+
+                const centerRawX = (minRX + maxRX) / 2;
+                const centerRawY = (minRY + maxRY) / 2;
+
+                rotatedPoints3D = rawPoints.map(p => ({
+                    rawX: p.rawX,
+                    rawY: p.rawY,
+                    x: (p.rawX - centerRawX) * scale + canvas.width / 2,  // ✅ 자동 스케일+센터링
+                    y: (p.rawY - centerRawY) * scale + canvas.height / 2,  // ✅ 자동 스케일+센터링
+                    z: p.z,
+                    score: p.score
+                }));
+
+                drawSkeletonLayers(rotatedPoints3D, ctx, "background");
+                drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
+            }
+
+            // BlazePose로 현재 작업자의 실제 Z(깊이) 좌표를 추출하여 kps에 z3D 속성으로 저장
+            async function enrichWith3DPose(person) {
+                if (!detector3D || !img.src || img.width === 0) return;
+                const kps = person.rawPose.keypoints;
+                const validKps = kps.filter(k => k.score > 0.1);
+                if (validKps.length < 4) return;
+
+                // 작업자 영역 크롭
+                const margin = 40;
+                const xs = validKps.map(k => k.x);
+                const ys = validKps.map(k => k.y);
+                const srcX = Math.max(0, Math.min(...xs) - margin);
+                const srcY = Math.max(0, Math.min(...ys) - margin);
+                const srcW = Math.min(img.width - srcX, Math.max(...xs) - srcX + margin * 2);
+                const srcH = Math.min(img.height - srcY, Math.max(...ys) - srcY + margin * 2);
+                if (srcW < 50 || srcH < 50) return;
+
+                const offCanvas = document.createElement('canvas');
+                offCanvas.width = srcW; offCanvas.height = srcH;
+                offCanvas.getContext('2d').drawImage(img, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
+
+                try {
+                    const poses = await detector3D.estimatePoses(offCanvas);
+                    if (!poses.length || !poses[0].keypoints3D) {
+                        person.has3DPose = false; return;
+                    }
+                    const kps3D = poses[0].keypoints3D; // BlazePose 3D 정규화 좌표
+
+                    // Z 스케일 계산: 정규화 좌표 → 픽셀 좌표 변환 비율
+                    // 기준: 몸통 세로 길이(골반~어깨) 픽셀 vs 정규화 값
+                    const lh = kps[11], rh = kps[12], ls = kps[5], rs = kps[6];
+                    if (!lh || !rh || !ls || !rs) { person.has3DPose = false; return; }
+                    const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+                    const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
+                    const torsoPixels = Math.hypot(shoulderMid.x - pelvisMid.x, shoulderMid.y - pelvisMid.y);
+
+                    // BlazePose 정규화 좌표계의 몸통 길이 (인덱스: 23=왼골반, 11=왼어깨)
+                    const bp23 = kps3D[23], bp11 = kps3D[11];
+                    const torsoNorm = (bp23 && bp11)
+                        ? Math.hypot(bp11.x - bp23.x, bp11.y - bp23.y)
+                        : 0.3; // 감지 실패 시 기본값
+                    const zScale = torsoPixels / (torsoNorm || 0.3);
+
+                    // BlazePose 33개 → MoveNet 17개 Z값 매핑
+                    Object.entries(BLAZEPOSE_TO_MOVENET).forEach(([bpIdxStr, mnIdx]) => {
+                        const bp = kps3D[parseInt(bpIdxStr)];
+                        if (bp && kps[mnIdx]) {
+                            // BlazePose z: 음수 = 카메라 가까움 (전경)
+                            // zScale로 픽셀 스케일로 변환
+                            kps[mnIdx].z3D = bp.z * zScale;
+                        }
+                    });
+
+                    person.has3DPose = true;
+                    console.log('BlazePose Z 추출 성공');
+                } catch (e) {
+                    console.warn('BlazePose 추정 실패 → 기하학적 폴백:', e);
+                    person.has3DPose = false;
+                }
+            }
+
+
+            function drawSkeletonLayers(points, ctx, layerType) {
+                // [수정됨] V자 선을 만들던 [0, 5], [0, 6] 제거
+                const connections = [
+                    [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
+                    [5, 11], [6, 12], [11, 12], [11, 13], [13, 15], [12, 14], [14, 16]
+                ];
+
+                ctx.lineWidth = 3;
+                connections.forEach(([i, j]) => {
+                    // ... (기존 connections.forEach 내부 선 그리기 로직은 그대로 둠) ...
+                    const p1 = points[i], p2 = points[j];
+                    if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
+                        const midZ = (p1.z + p2.z) / 2;
+                        const isBackgroundLine = midZ > 0;
+
+                        if ((layerType === "background" && isBackgroundLine) ||
+                            (layerType === "foreground" && !isBackgroundLine)) {
+                            ctx.beginPath();
+                            let strokeColor = '';
+                            const isLeftLine = (i % 2 !== 0 && j % 2 !== 0 && i >= 5 && j >= 5);
+                            const isRightLine = (i % 2 === 0 && j % 2 === 0 && i >= 6 && j >= 6);
+                            if (isLeftLine) strokeColor = isBackgroundLine ? '#127356' : '#20c997';
+                            else if (isRightLine) strokeColor = isBackgroundLine ? '#1864ab' : '#4dabf7';
+                            else strokeColor = isBackgroundLine ? '#6c757d' : '#ced4da';
+                            ctx.strokeStyle = strokeColor;
+                            ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
+                            ctx.stroke();
+                        }
+                    }
+                });
+
+                // 🌟 [신규 추가] T-프레임 (목 중심선 및 시선 방향 벡터) 수동 렌더링
+                const nose = points[0], earL = points[3], earR = points[4], shL = points[5], shR = points[6];
+                if (nose && earL && earR && shL && shR && nose.score > 0.1) {
+                    const earCenter = { x: (earL.x + earR.x) / 2, y: (earL.y + earR.y) / 2, z: (earL.z + earR.z) / 2 };
+                    const shCenter = { x: (shL.x + shR.x) / 2, y: (shL.y + shR.y) / 2, z: (shL.z + shR.z) / 2 };
+                    const midZ = (earCenter.z + shCenter.z) / 2;
+                    const isBackgroundLine = midZ > 0;
+
+                    if ((layerType === "background" && isBackgroundLine) || (layerType === "foreground" && !isBackgroundLine)) {
+                        ctx.lineWidth = 3;
+                        // 1. 목 중심선 (어깨 중앙 -> 귀 중앙) : 회색
+                        ctx.beginPath(); ctx.strokeStyle = isBackgroundLine ? '#6c757d' : '#ced4da';
+                        ctx.moveTo(shCenter.x, shCenter.y); ctx.lineTo(earCenter.x, earCenter.y); ctx.stroke();
+                        // 2. 안면 시선 벡터 (귀 중앙 -> 코) : 강렬한 붉은색
+                        ctx.beginPath(); ctx.strokeStyle = isBackgroundLine ? '#cc0000' : '#ff4d4d';
+                        ctx.moveTo(earCenter.x, earCenter.y); ctx.lineTo(nose.x, nose.y); ctx.stroke();
+                    }
+                }
+
+                points.forEach((pt, idx) => {
+                    if (pt.score > 0.1) {
+                        // 🌟 [신규 추가] 시각적 노이즈를 일으키는 눈(1, 2번) 렌더링 완전 제외
+                        if (idx === 1 || idx === 2) return;
+
+                        const isBackgroundPt = pt.z > 0;
+                        if ((layerType === "background" && isBackgroundPt) ||
+                            (layerType === "foreground" && !isBackgroundPt)) {
+
+                            ctx.beginPath();
+                            let fillColor = '';
+                            if (idx === selectedPointIndex3D) {
+                                fillColor = '#ff3333';
+                            } else if (idx === 0) {
+                                fillColor = isBackgroundPt ? '#b8a670' : '#ffeaa7'; // 코: 노란색
+                            } else if (idx === 3 || idx === 4) { // 🌟 귀 좌우 색상 부여
+                                fillColor = (idx === 3) ? (isBackgroundPt ? '#127356' : '#20c997') : (isBackgroundPt ? '#1864ab' : '#4dabf7');
+                            } else if (idx % 2 !== 0) {
+                                fillColor = isBackgroundPt ? '#127356' : '#20c997'; // 좌측
+                            } else {
+                                fillColor = isBackgroundPt ? '#1864ab' : '#4dabf7'; // 우측
+                            }
+
+                            // [신규 추가] 선택된 관절은 원의 크기도 살짝 키워줍니다
+                            const radius = (idx === selectedPointIndex3D) ? 9 : 7;
+                            ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
+
+                            ctx.fillStyle = fillColor;
+                            ctx.fill();
+
+                            // 원근감 강조를 위해 뒤쪽 뼈대 외곽선은 어둡게 처리
+                            // [신규 추가] 선택된 관절은 테두리도 눈에 띄게 노란색으로 강조
+                            ctx.strokeStyle = (idx === selectedPointIndex3D) ? '#ffff00' : (isBackgroundPt ? '#222' : '#fff');
+                            ctx.lineWidth = (idx === selectedPointIndex3D) ? 2 : 1;
+                            ctx.stroke();
+                        }
+                    }
+                });
+            }
+
+            document.getElementById('btnSwapLeftRight3D').addEventListener('click', function () {
+                const person = personDataList[activePersonIndex];
+                if (!person || !person.rawPose || !person.rawPose.keypoints) {
+                    alert("교체할 신체 데이터가 없습니다.");
+                    return;
+                }
+
+                const kps = person.rawPose.keypoints;
+
+                // Step 1. rawPose keypoints 좌우 교체
+                const kpPairs = [
+                    [1, 2], [3, 4], [5, 6], [7, 8],
+                    [9, 10], [11, 12], [13, 14], [15, 16]
+                ];
+
+                kpPairs.forEach(([lIdx, rIdx]) => {
+                    if (kps[lIdx] && kps[rIdx]) {
+                        const tempX = kps[lIdx].x;
+                        const tempY = kps[lIdx].y;
+                        const tempScore = kps[lIdx].score;
+                        kps[lIdx].x = kps[rIdx].x;
+                        kps[lIdx].y = kps[rIdx].y;
+                        kps[lIdx].score = kps[rIdx].score;
+                        kps[rIdx].x = tempX;
+                        kps[rIdx].y = tempY;
+                        kps[rIdx].score = tempScore;
+                    }
+                });
+
+                // Step 2. angles 배열 좌우 교체
+                if (person.angles) {
+                    const anglePairs = [
+                        [2, 6], [3, 7], [4, 8], [5, 9]
+                    ];
+                    anglePairs.forEach(([rAng, lAng]) => {
+                        const temp = person.angles[rAng];
+                        person.angles[rAng] = person.angles[lAng];
+                        person.angles[lAng] = temp;
+                    });
+                }
+
+                // ✅ 수정 2: syncAll2DTo3D 호출 제거
+                //    (kps를 이미 교체했으므로 angles 기반으로 재덮어쓰면 교체 효과가 소멸됨)
+
+                // ✅ 수정 5: 교체 후 isBilateral 재판별
+                const hasRightArm = !!person.angles[2] || !!person.angles[3];
+                const hasLeftArm = !!person.angles[6] || !!person.angles[7];
+                const hasRightLeg = !!person.angles[5];
+                const hasLeftLeg = !!person.angles[9];
+                person.isBilateral = {
+                    arms: hasRightArm && hasLeftArm,
+                    legs: hasRightLeg && hasLeftLeg
+                };
+
+                render3DModal();
+                console.log("신체 좌우 데이터가 성공적으로 교체되었습니다.");
+            });
+
+            // 보정된 좌표를 메인 패널에 덮어쓰고 각도 재계산
+            window.apply3DCorrection = function () {
+                if (rotatedPoints3D.length === 0) return;
+                const person = personDataList[activePersonIndex];
+
+                // 회전이 적용된 새로운 좌표를 덮어씀
+                rotatedPoints3D.forEach((rpt, idx) => {
+                    if (person.rawPose.keypoints[idx]) {
+                        person.rawPose.keypoints[idx].x = rpt.rawX;
+                        person.rawPose.keypoints[idx].y = rpt.rawY;
+                    }
+                });
+
+                person.neckYaw = modalNeckYaw;
+                person.trunkYaw = modalTrunkYaw;
+                person.camYaw = modalCamYaw; // 👇 신규 추가: 적용된 카메라 회전값 저장
+
+                autoCalculateAngles(person);
+
+                close3DModal();
+                drawAll(); // 좌측 메인 캔버스 및 우측 리스트 갱신
+
+                statusMsg.textContent = "비틀림 보정에 따른 각도 재산출 완료";
+                statusMsg.style.color = "#d9534f";
+            };
+
+            // ─── [수정됨] 3D 모달 내 신체 포인트 마우스 드래그 (정밀 좌표 매핑 및 우클릭 지원) ───
+            let modalDraggingIdx = -1;
+            let lastModalMousePos = { x: 0, y: 0 };
+            const modalCanvas = document.getElementById('canvas3DModal');
+
+            // 🌟 우클릭 시 브라우저 메뉴가 뜨는 것을 방지
+            modalCanvas.addEventListener('contextmenu', function (e) {
+                e.preventDefault();
+            });
+
+            // 1. 마우스 누름 (정밀 스케일링 적용)
+            modalCanvas.addEventListener('mousedown', function (e) {
+                // 좌클릭(0) 또는 우클릭(2)만 허용
+                if (e.button !== 0 && e.button !== 2) return;
+
+                const rect = modalCanvas.getBoundingClientRect();
+                const scaleX = modalCanvas.width / rect.width;
+                const scaleY = modalCanvas.height / rect.height;
+
+                const mx = (e.clientX - rect.left) * scaleX;
+                const my = (e.clientY - rect.top) * scaleY;
+
+                let clickedAnyPoint = false; // 🟢 [수정 1] 변수 선언 추가 (에러 해결)
+
+                for (let i = 0; i < rotatedPoints3D.length; i++) {
+                    if (NON_SELECTABLE_JOINTS.includes(i)) continue; // 눈 클릭 차단
+                    const pt = rotatedPoints3D[i];
+                    if (pt && pt.score > 0.1) {
+                        const dist = Math.hypot(pt.x - mx, pt.y - my);
+                        if (dist < 20) {
+                            modalDraggingIdx = i;
+                            selectedPointIndex3D = i; // 🟢 [수정 2] 클릭한 관절 인덱스를 저장하여 색상 변경 트리거
+                            clickedAnyPoint = true;   // 🟢 [수정 3] 클릭 성공 여부 저장
+                            lastModalMousePos = { x: mx, y: my };
+                            modalCanvas.style.cursor = 'grabbing';
+                            break;
+                        }
+                    }
+                }
+
+                // 허공을 클릭하면 선택 해제 (원래 색상으로 복귀)
+                if (!clickedAnyPoint) {
+                    selectedPointIndex3D = -1;
+                }
+
+                updateFineTunePanel(selectedPointIndex3D);
+
+                render3DModal(); // 화면 즉시 갱신
+            });
+
+            // 2. 마우스 이동 (드래그)
+            modalCanvas.addEventListener('mousemove', function (e) {
+                const rect = modalCanvas.getBoundingClientRect();
+                const scaleX = modalCanvas.width / rect.width;
+                const scaleY = modalCanvas.height / rect.height;
+                const mx = (e.clientX - rect.left) * scaleX;
+                const my = (e.clientY - rect.top) * scaleY;
+
+                // 드래그 중이 아닐 때 Hover 효과 (마우스가 근처에 가면 손가락 모양)
+                if (modalDraggingIdx === -1) {
+                    let isHover = false;
+                    for (let i = 0; i < rotatedPoints3D.length; i++) {
+                        const pt = rotatedPoints3D[i];
+                        if (pt && pt.score > 0.1 && Math.hypot(pt.x - mx, pt.y - my) < 20) {
+                            isHover = true; break;
+                        }
+                    }
+                    modalCanvas.style.cursor = isHover ? 'grab' : 'default';
+                    return;
+                }
+
+                // 드래그 중일 때 이동 거리(dx, dy) 계산
+                const dx = mx - lastModalMousePos.x;
+                const dy = my - lastModalMousePos.y;
+
+                const person = personDataList[activePersonIndex];
+                const kps = person.rawPose.keypoints;
+
+                if (kps[modalDraggingIdx]) {
+                    // 원본 X, Y 좌표에 이동량 반영
+                    kps[modalDraggingIdx].x += dx / currentScale3D;
+                    kps[modalDraggingIdx].y += dy / currentScale3D;
+                    kps[modalDraggingIdx].score = 1.0; // 보정된 점 보호
+
+                    if (modalDraggingIdx === selectedPointIndex3D) {
+                        activeJointInitX = kps[modalDraggingIdx].x;
+                        activeJointInitY = kps[modalDraggingIdx].y;
+                        document.getElementById('fineTuneX').value = 0;
+                        document.getElementById('fineTuneXVal').innerText = "0";
+                        document.getElementById('fineTuneY').value = 0;
+                        document.getElementById('fineTuneYVal').innerText = "0";
+                    }
+                }
+
+                lastModalMousePos = { x: mx, y: my };
+                render3DModal(); // 화면 즉시 갱신
+            });
+
+            // 3. 마우스 뗌
+            modalCanvas.addEventListener('mouseup', function (e) {
+                modalDraggingIdx = -1;
+                // 마우스를 떼었을 때 바로 grab(대기) 상태로 전환
+                modalCanvas.style.cursor = 'grab';
+            });
+
+            // 4. 모달 영역 밖으로 이탈
+            modalCanvas.addEventListener('mouseleave', function (e) {
+                modalDraggingIdx = -1;
+                modalCanvas.style.cursor = 'default';
+            });
+
+            // 👇 수정됨: 2D 수동 입력/수정 값을 3D(rawPose) 뼈대에 동기화하는 함수
+            window.syncPointsToRawPose = function (activeData, targetIndex, points) {
+                if (!activeData.rawPose || !activeData.rawPose.keypoints) return;
+                const kps = activeData.rawPose.keypoints;
+
+                const updateKp = (idx, pt) => {
+                    if (idx !== -1 && kps[idx]) {
+                        kps[idx].x = pt.x;
+                        kps[idx].y = pt.y;
+                        if (kps[idx].score < 0.15) kps[idx].score = 0.15;
+                    }
+                };
+
+                // 🌟 AI 점수 대신 전문가의 현재 패널 상태를 기준으로 방향 판별
+                const rightLeg = !!activeData.angles[5];
+                const leftLeg = !!activeData.angles[9];
+                const rightArm = !!activeData.angles[2] || !!activeData.angles[3];
+                const leftArm = !!activeData.angles[6] || !!activeData.angles[7];
+
+                let isFacingRight = true;
+                if (leftLeg && !rightLeg) isFacingRight = false;
+                else if (rightLeg && !leftLeg) isFacingRight = true;
+                else if (leftArm && !rightArm) isFacingRight = false;
+                else if (rightArm && !leftArm) isFacingRight = true;
+                else {
+                    const lScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
+                    const rScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
+                    isFacingRight = rScore >= lScore;
+                }
+
+                if (targetIndex === 0) {
+                    const headIdx = kps[0].score > 0.1 ? 0 : (isFacingRight ? 4 : 3);
+                    updateKp(headIdx, points[0]);
+
+                    if (activeData.isBilateral.arms) {
+                        const midX = (kps[5].x + kps[6].x) / 2; const midY = (kps[5].y + kps[6].y) / 2;
+                        const dx = points[1].x - midX; const dy = points[1].y - midY;
+                        updateKp(5, { x: kps[5].x + dx, y: kps[5].y + dy });
+                        updateKp(6, { x: kps[6].x + dx, y: kps[6].y + dy });
+                    } else {
+                        updateKp(isFacingRight ? 6 : 5, points[1]);
+                    }
+                } else if (targetIndex === 1) {
+                    if (activeData.isBilateral.legs) {
+                        const midX = (kps[11].x + kps[12].x) / 2; const midY = (kps[11].y + kps[12].y) / 2;
+                        const dx = points[1].x - midX; const dy = points[1].y - midY;
+                        updateKp(11, { x: kps[11].x + dx, y: kps[11].y + dy });
+                        updateKp(12, { x: kps[12].x + dx, y: kps[12].y + dy });
+                    } else {
+                        updateKp(isFacingRight ? 12 : 11, points[1]);
+                    }
+
+                    if (activeData.isBilateral.arms) {
+                        const midX = (kps[5].x + kps[6].x) / 2; const midY = (kps[5].y + kps[6].y) / 2;
+                        const dx = points[2].x - midX; const dy = points[2].y - midY;
+                        updateKp(5, { x: kps[5].x + dx, y: kps[5].y + dy });
+                        updateKp(6, { x: kps[6].x + dx, y: kps[6].y + dy });
+                    } else {
+                        updateKp(isFacingRight ? 6 : 5, points[2]);
+                    }
+                } else {
+                    const map = {
+                        2: [12, 6, 8], 3: [6, 8, 10], 4: [8, 10, 10], 5: [12, 14, 16],
+                        6: [11, 5, 7], 7: [5, 7, 9], 8: [7, 9, 9], 9: [11, 13, 15]
+                    };
+                    if (map[targetIndex]) {
+                        map[targetIndex].forEach((kIdx, i) => {
+                            if (points[i]) updateKp(kIdx, points[i]);
+                        });
+                    }
+                }
+            };
+        </script>
+</body>
+
+</html>
