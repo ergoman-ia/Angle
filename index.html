@@ -2364,17 +2364,16 @@
                     document.getElementById('modal3D-overlay').style.display = 'block';
                     document.getElementById('modal3D').style.display = 'block';
 
-                    // 1. 전체 시점 회전(카메라) 값 연속 연동
+                    // ✅ 이전에 저장된 각도를 슬라이더 초기값으로 복원
+                    // (절대값 방식이므로 누적 없이 그대로 표시)
                     modalCamYaw = person.camYaw || 0;
                     document.getElementById('camYawSlider').value = modalCamYaw;
                     document.getElementById('camYawValue').innerText = modalCamYaw + "°";
 
-                    // 2. 허리(몸통) 비틀림 값 연속 연동
                     modalTrunkYaw = person.trunkYaw || 0;
                     document.getElementById('trunkYawSlider').value = modalTrunkYaw;
                     document.getElementById('trunkYawValue').innerText = modalTrunkYaw + "°";
 
-                    // 3. 목 비틀림 값 연속 연동
                     modalNeckYaw = person.neckYaw || 0;
                     document.getElementById('neckYawSlider').value = modalNeckYaw;
                     document.getElementById('neckYawValue').innerText = modalNeckYaw + "°";
@@ -2426,13 +2425,9 @@
                 const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
                 const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
 
-                const deltaCamYaw = modalCamYaw - openingCamYaw;
-                const deltaTrunkYaw = modalTrunkYaw - openingTrunkYaw;
-                const deltaNeckYaw = modalNeckYaw - openingNeckYaw;
-
-                const camRad = -(deltaCamYaw * Math.PI) / 180;
-                const trunkRad = -(deltaTrunkYaw * Math.PI) / 180;
-                const neckRad = -(deltaNeckYaw * Math.PI) / 180;
+                const camRad = -(modalCamYaw * Math.PI) / 180;
+                const trunkRad = -(modalTrunkYaw * Math.PI) / 180;
+                const neckRad = -(modalNeckYaw * Math.PI) / 180;
 
                 // 🌟 [수정 1] 2D 패널 상태를 기준으로 고정된(Baseline) 방향성 확립
                 const rightLeg = !!person.angles[5];
@@ -2769,29 +2764,31 @@
                 console.log("신체 좌우 데이터가 성공적으로 교체되었습니다.");
             });
 
-            // 보정된 좌표를 메인 패널에 덮어쓰고 각도 재계산
             window.apply3DCorrection = function () {
-                if (rotatedPoints3D.length === 0) return;
                 const person = personDataList[activePersonIndex];
+                const kps = person.rawPose.keypoints;
 
-                // 회전이 적용된 새로운 좌표를 덮어씀
-                rotatedPoints3D.forEach((rpt, idx) => {
-                    if (person.rawPose.keypoints[idx]) {
-                        person.rawPose.keypoints[idx].x = rpt.rawX;
-                        person.rawPose.keypoints[idx].y = rpt.rawY;
+                // ✅ 회전 각도만 저장 — World 좌표(kps.x/y)는 건드리지 않음
+                person.neckYaw = modalNeckYaw;
+                person.trunkYaw = modalTrunkYaw;
+                person.camYaw = modalCamYaw;
+
+                // ✅ 미세조정 중 드래그로 변경된 World 좌표는 이미 kps에 반영되어 있음
+                // ✅ zOffset 누적 방지: apply 시점에 z3D로 흡수하고 zOffset 초기화
+                kps.forEach(kp => {
+                    if (kp.zOffset !== undefined && kp.zOffset !== 0) {
+                        kp.z3D = (kp.z3D || 0) + kp.zOffset;
+                        kp.zOffset = 0;
                     }
                 });
 
-                person.neckYaw = modalNeckYaw;
-                person.trunkYaw = modalTrunkYaw;
-                person.camYaw = modalCamYaw; // 👇 신규 추가: 적용된 카메라 회전값 저장
-
+                // 회전 보정각을 반영한 각도 재계산
+                // (autoCalculateAngles는 kps.x/y 기반 — 회전각은 별도 보정)
                 autoCalculateAngles(person);
-
                 close3DModal();
-                drawAll(); // 좌측 메인 캔버스 및 우측 리스트 갱신
+                drawAll();
 
-                statusMsg.textContent = "비틀림 보정에 따른 각도 재산출 완료";
+                statusMsg.textContent = `보정 완료 (캠: ${modalCamYaw}°, 몸통: ${modalTrunkYaw}°, 목: ${modalNeckYaw}°)`;
                 statusMsg.style.color = "#d9534f";
             };
 
