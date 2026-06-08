@@ -684,17 +684,17 @@
                     if (e.key === 'Tab') {
                         e.preventDefault(); // 브라우저 고유의 포커스 이동 현상 방지
 
-                        // 키포인트 총 개수는 0번부터 16번까지 총 17개
-                        if (e.shiftKey) {
-                            // Shift + Tab : 역방향 순환
-                            if (selectedPointIndex3D <= 0) {
-                                selectedPointIndex3D = 16;
-                            } else {
-                                selectedPointIndex3D--;
+                        const kps = personDataList[activePersonIndex].rawPose.keypoints;
+                        let next = selectedPointIndex3D;
+                        let found = false;
+                        for (let attempt = 0; attempt < 17; attempt++) {
+                            next = e.shiftKey ? (next <= 0 ? 16 : next - 1) : (next + 1) % 17;
+                            // 눈(1,2) 제외 + score 0.1 이하인 비가시 관절 제외
+                            if (!NON_SELECTABLE_JOINTS.includes(next) && kps[next] && kps[next].score > 0.1) {
+                                selectedPointIndex3D = next;
+                                found = true;
+                                break;
                             }
-                        } else {
-                            // 일반 Tab : 정방향 순환
-                            selectedPointIndex3D = (selectedPointIndex3D + 1) % 17;
                         }
 
                         // 지난번에 구현한 미세조정 패널 UI 갱신 함수 호출
@@ -2212,6 +2212,7 @@
             let rotatedPoints3D = []; // 보정 후 좌표 임시 저장 배열
             let selectedPointIndex3D = -1;
 
+            const NON_SELECTABLE_JOINTS = [1, 2];
 
             // 👇 신규 추가: 관절 맵핑 및 미세조정 로직
             const JOINT_NAMES = {
@@ -2225,14 +2226,15 @@
 
             function updateFineTunePanel(idx) {
                 const panel = document.getElementById('fineTunePanel');
+                panel.style.display = 'flex'; // 항상 표시
+
                 if (idx === -1) {
-                    panel.style.display = 'none';
+                    document.getElementById('selectedJointName').innerText = '없음';
                     return;
                 }
                 const kps = personDataList[activePersonIndex].rawPose.keypoints;
                 if (!kps[idx]) return;
 
-                panel.style.display = 'flex';
                 document.getElementById('selectedJointName').innerText = JOINT_NAMES[idx] || `관절 ${idx}`;
 
                 activeJointInitX = kps[idx].x;
@@ -2296,6 +2298,9 @@
                     modalNeckYaw = person.neckYaw || 0;
                     document.getElementById('neckYawSlider').value = modalNeckYaw;
                     document.getElementById('neckYawValue').innerText = modalNeckYaw + "°";
+
+                    selectedPointIndex3D = 6;
+                    updateFineTunePanel(6);
 
                     render3DModal();
                 });
@@ -2538,7 +2543,7 @@
                             }
 
                             // [신규 추가] 선택된 관절은 원의 크기도 살짝 키워줍니다
-                            const radius = (idx === selectedPointIndex3D) ? 7 : Math.max(3, 7 - (pt.z * 0.05));
+                            const radius = (idx === selectedPointIndex3D) ? 9 : 7;
                             ctx.arc(pt.x, pt.y, radius, 0, 2 * Math.PI);
 
                             ctx.fillStyle = fillColor;
@@ -2649,7 +2654,6 @@
             });
 
             // 1. 마우스 누름 (정밀 스케일링 적용)
-            // 1. 마우스 누름 (정밀 스케일링 적용)
             modalCanvas.addEventListener('mousedown', function (e) {
                 // 좌클릭(0) 또는 우클릭(2)만 허용
                 if (e.button !== 0 && e.button !== 2) return;
@@ -2664,6 +2668,7 @@
                 let clickedAnyPoint = false; // 🟢 [수정 1] 변수 선언 추가 (에러 해결)
 
                 for (let i = 0; i < rotatedPoints3D.length; i++) {
+                    if (NON_SELECTABLE_JOINTS.includes(i)) continue; // 눈 클릭 차단
                     const pt = rotatedPoints3D[i];
                     if (pt && pt.score > 0.1) {
                         const dist = Math.hypot(pt.x - mx, pt.y - my);
