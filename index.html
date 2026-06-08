@@ -386,8 +386,10 @@
             padding: 20px;
             border-radius: 12px;
             z-index: 1000;
-            width: 450px;
+            width: 900px; /* 👈 기존 450px에서 900px로 2배 확대 */
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            max-height: 90vh;
+            overflow-y: auto;
         }
 
         .modal-header {
@@ -399,15 +401,21 @@
             color: #333;
         }
 
+        /* 👈 기존 text-align: center를 지우고 좌우 분할(flex) 구조 적용 */
         .modal-body {
-            text-align: center;
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
         }
 
+        /* 👈 버튼들이 우측 패널 맨 아래에 고정되도록 수정 */
         .modal-footer {
-            margin-top: 20px;
+            margin-top: auto;
+            padding-top: 15px;
             display: flex;
             justify-content: flex-end;
             gap: 10px;
+            border-top: 1px solid #eee;
         }
     </style>
 </head>
@@ -419,68 +427,61 @@
     <div id="modal3D">
         <div class="modal-header">🧭 정면 비틀림 및 불균형 보정 (3D)</div>
         <div class="modal-body">
-            <canvas id="canvas3DModal" width="400" height="400"
-                style="background:#1e1e1e; border-radius:8px; width: 100%;"></canvas>
-            <p style="font-size:12px; color:#666; margin-top:8px;">마우스로 슬라이더를 움직여 스켈레톤을 정면으로 맞추세요.</p>
+            
+            <div style="flex: 1; display: flex; flex-direction: column; align-items: center;">
+                <canvas id="canvas3DModal" width="480" height="480" style="background:#1e1e1e; border-radius:8px; width: 100%;"></canvas>
+                <p style="font-size:12px; color:#666; margin-top:8px;">관절을 클릭하여 선택한 후 우측 슬라이더로 미세 조정하세요.</p>
+            </div>
 
-            <div
-                style="margin-top: 15px; display: flex; flex-direction: column; gap: 8px; background: #f8f9fa; padding: 12px; border-radius: 6px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <label style="font-weight:bold; font-size:13px; min-width: 100px; color:#555;">전체 시점 회전:</label>
-                    <input type="range" id="camYawSlider" min="-90" max="90" value="0" style="flex:1;">
-                    <span id="camYawValue"
-                        style="font-weight:bold; color:#007BFF; min-width:40px; text-align: right;">0°</span>
+            <div style="width: 380px; display: flex; flex-direction: column; min-height: 480px;">
+                
+                <div style="display: flex; flex-direction: column; gap: 8px; background: #f8f9fa; padding: 12px; border-radius: 6px;">
+                    <div style="font-weight:bold; font-size:13px; margin-bottom: 5px;">🔄 전체/몸통/목 비틀림</div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#555;">전체 시점:</label>
+                        <input type="range" id="camYawSlider" min="-90" max="90" value="0" style="flex:1;">
+                        <span id="camYawValue" style="font-weight:bold; color:#007BFF; min-width:35px; text-align: right;">0°</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#d9534f;">몸통 비틀림:</label>
+                        <input type="range" id="trunkYawSlider" min="-60" max="60" value="0" style="flex:1;">
+                        <span id="trunkYawValue" style="font-weight:bold; color:#d9534f; min-width:35px; text-align: right;">0°</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#28a745;">목 비틀림:</label>
+                        <input type="range" id="neckYawSlider" min="-60" max="60" value="0" style="flex:1;">
+                        <span id="neckYawValue" style="font-weight:bold; color:#28a745; min-width:35px; text-align: right;">0°</span>
+                    </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <label style="font-weight:bold; font-size:13px; min-width: 100px; color:#d9534f;">몸통 비틀림:</label>
-                    <input type="range" id="trunkYawSlider" min="-60" max="60" value="0" style="flex:1;">
-                    <span id="trunkYawValue"
-                        style="font-weight:bold; color:#d9534f; min-width:40px; text-align: right;">0°</span>
+
+                <div id="fineTunePanel" style="margin-top: 15px; display: none; flex-direction: column; gap: 8px; background: #eef2f5; padding: 12px; border-radius: 6px; border: 1px solid #cdd4db;">
+                    <div style="font-weight:bold; color:#333; margin-bottom: 5px; font-size: 13px;">
+                        🎯 선택된 부위 조정: <span id="selectedJointName" style="color:#007BFF;">없음</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">X축(좌/우):</label>
+                        <input type="range" id="fineTuneX" min="-50" max="50" value="0" style="flex:1;">
+                        <span id="fineTuneXVal" style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">Y축(상/하):</label>
+                        <input type="range" id="fineTuneY" min="-50" max="50" value="0" style="flex:1;">
+                        <span id="fineTuneYVal" style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">Z축(앞/뒤):</label>
+                        <input type="range" id="fineTuneZ" min="-50" max="50" value="0" style="flex:1;">
+                        <span id="fineTuneZVal" style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
+                    </div>
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <label style="font-weight:bold; font-size:13px; min-width: 100px; color:#28a745;">목 비틀림:</label>
-                    <input type="range" id="neckYawSlider" min="-60" max="60" value="0" style="flex:1;">
-                    <span id="neckYawValue"
-                        style="font-weight:bold; color:#28a745; min-width:40px; text-align: right;">0°</span>
+
+                <div class="modal-footer">
+                    <button class="save" style="background-color: #6c757d; width: auto; padding: 8px 15px; font-size: 14px;" onclick="close3DModal()">취소</button>
+                    <button id="btnSwapLeftRight3D" class="btn btn-warning" style="padding: 8px 15px; background-color: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 14px;">🔄 좌/우 바꾸기</button>
+                    <button class="save" style="background-color: #6f42c1; width: auto; padding: 8px 15px; font-size: 14px;" onclick="apply3DCorrection()">보정값 각도 반영</button>
                 </div>
-            </div>
-        </div>
 
-        <div id="fineTunePanel"
-            style="margin-top: 15px; display: none; flex-direction: column; gap: 8px; background: #eef2f5; padding: 12px; border-radius: 6px; border: 1px solid #cdd4db;">
-            <div style="font-weight:bold; color:#333; margin-bottom: 5px; font-size: 13px;">
-                🎯 선택된 부위 정밀 조정: <span id="selectedJointName" style="color:#007BFF; font-weight: 800;">없음</span>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#555;">X축 (좌/우):</label>
-                <input type="range" id="fineTuneX" min="-100" max="100" value="0" style="flex:1;">
-                <span id="fineTuneXVal"
-                    style="font-size:12px; min-width:30px; text-align: right; font-weight:bold; color:#555;">0</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#555;">Y축 (상/하):</label>
-                <input type="range" id="fineTuneY" min="-100" max="100" value="0" style="flex:1;">
-                <span id="fineTuneYVal"
-                    style="font-size:12px; min-width:30px; text-align: right; font-weight:bold; color:#555;">0</span>
-            </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <label style="font-size:12px; font-weight:bold; min-width: 80px; color:#555;">Z축 (앞/뒤):</label>
-                <input type="range" id="fineTuneZ" min="-100" max="100" value="0" style="flex:1;">
-                <span id="fineTuneZVal"
-                    style="font-size:12px; min-width:30px; text-align: right; font-weight:bold; color:#555;">0</span>
-            </div>
-        </div>
-
-
-        <div class="modal-footer">
-            <button class="save" style="background-color: #6c757d; width: auto; padding: 10px 20px;"
-                onclick="close3DModal()">취소</button>
-            <button id="btnSwapLeftRight3D" class="btn btn-warning"
-                style="padding: 8px 16px; background-color: #e67e22; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
-                🔄 좌/우 바꾸기
-            </button>
-            <button class="save" style="background-color: #6f42c1; width: auto; padding: 10px 20px;"
-                onclick="apply3DCorrection()">보정값 각도 반영</button>
         </div>
     </div>
 
@@ -2163,9 +2164,9 @@
             let selectedPointIndex3D = -1;
 
 
-            // 👇 신규 추가: 관절 이름 맵핑 및 미세조정용 기준 좌표 변수
+            // 👇 신규 추가: 관절 맵핑 및 미세조정 로직
             const JOINT_NAMES = {
-                0: "목 (중심점)", 1: "왼쪽 눈", 2: "오른쪽 눈", 3: "왼쪽 귀", 4: "오른쪽 귀",
+                0: "얼굴(목) 중심", 1: "왼쪽 눈", 2: "오른쪽 눈", 3: "왼쪽 귀", 4: "오른쪽 귀",
                 5: "왼쪽 어깨", 6: "오른쪽 어깨", 7: "왼쪽 팔꿈치", 8: "오른쪽 팔꿈치",
                 9: "왼쪽 손목", 10: "오른쪽 손목", 11: "왼쪽 골반", 12: "오른쪽 골반",
                 13: "왼쪽 무릎", 14: "오른쪽 무릎", 15: "왼쪽 발목", 16: "오른쪽 발목"
@@ -2173,49 +2174,42 @@
             let activeJointInitX = 0;
             let activeJointInitY = 0;
 
-            // 미세조정 패널을 화면에 업데이트 하는 함수
             function updateFineTunePanel(idx) {
                 const panel = document.getElementById('fineTunePanel');
                 if (idx === -1) {
                     panel.style.display = 'none';
                     return;
                 }
-
                 const kps = personDataList[activePersonIndex].rawPose.keypoints;
                 if (!kps[idx]) return;
 
                 panel.style.display = 'flex';
                 document.getElementById('selectedJointName').innerText = JOINT_NAMES[idx] || `관절 ${idx}`;
 
-                // 현재 좌표를 기준점으로 잡음
                 activeJointInitX = kps[idx].x;
                 activeJointInitY = kps[idx].y;
-                const initZ = kps[idx].zOffset || 0; // 기존에 입력해둔 Z값이 있으면 불러옴
+                const initZ = kps[idx].zOffset || 0;
 
-                // 슬라이더 UI 초기화
-                document.getElementById('fineTuneX').value = 0;
-                document.getElementById('fineTuneXVal').innerText = "0";
-                document.getElementById('fineTuneY').value = 0;
-                document.getElementById('fineTuneYVal').innerText = "0";
+                ['X', 'Y'].forEach(axis => {
+                    document.getElementById(`fineTune${axis}`).value = 0;
+                    document.getElementById(`fineTune${axis}Val`).innerText = "0";
+                });
                 document.getElementById('fineTuneZ').value = initZ;
                 document.getElementById('fineTuneZVal').innerText = initZ;
             }
 
-            // X, Y, Z 슬라이더 조작 시 3D 모델에 즉시 반영
             ['X', 'Y', 'Z'].forEach(axis => {
                 document.getElementById(`fineTune${axis}`).addEventListener('input', function (e) {
                     if (selectedPointIndex3D === -1) return;
-
                     const val = parseInt(e.target.value);
                     document.getElementById(`fineTune${axis}Val`).innerText = val;
-
+                    
                     const kps = personDataList[activePersonIndex].rawPose.keypoints;
-
                     if (axis === 'X') kps[selectedPointIndex3D].x = activeJointInitX + val;
                     if (axis === 'Y') kps[selectedPointIndex3D].y = activeJointInitY + val;
-                    if (axis === 'Z') kps[selectedPointIndex3D].zOffset = val; // Z축은 별도 오프셋으로 저장
-
-                    kps[selectedPointIndex3D].score = 1.0; // 수동 조작된 점 보호
+                    if (axis === 'Z') kps[selectedPointIndex3D].zOffset = val;
+                    
+                    kps[selectedPointIndex3D].score = 1.0; 
                     render3DModal();
                 });
             });
