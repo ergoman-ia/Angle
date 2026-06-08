@@ -465,21 +465,35 @@
                     <div style="font-weight:bold; color:#333; margin-bottom: 5px; font-size: 13px;">
                         🎯 선택된 부위 조정: <span id="selectedJointName" style="color:#007BFF;">없음</span>
                     </div>
+                    <div style="display:flex; align-items:center; gap:6px; margin-bottom:6px;
+            background:#fff; border:1px solid #ccc; border-radius:5px; padding:5px 8px;">
+                        <span style="font-size:11px; font-weight:bold; color:#555; min-width:50px;">이동 배율:</span>
+                        <label style="font-size:12px; cursor:pointer;">
+                            <input type="radio" name="ftScale" value="1" checked> ×1 <span
+                                style="color:#888;">(정밀)</span>
+                        </label>
+                        <label style="font-size:12px; cursor:pointer;">
+                            <input type="radio" name="ftScale" value="5"> ×5 <span style="color:#888;">(보통)</span>
+                        </label>
+                        <label style="font-size:12px; cursor:pointer;">
+                            <input type="radio" name="ftScale" value="15"> ×15 <span style="color:#888;">(크게)</span>
+                        </label>
+                    </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">X축(좌/우):</label>
-                        <input type="range" id="fineTuneX" min="-50" max="50" value="0" style="flex:1;">
+                        <input type="range" id="fineTuneX" min="-100" max="100" value="0" style="flex:1;">
                         <span id="fineTuneXVal"
                             style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">Y축(상/하):</label>
-                        <input type="range" id="fineTuneY" min="-50" max="50" value="0" style="flex:1;">
+                        <input type="range" id="fineTuneY" min="-100" max="100" value="0" style="flex:1;">
                         <span id="fineTuneYVal"
                             style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">Z축(앞/뒤):</label>
-                        <input type="range" id="fineTuneZ" min="-50" max="50" value="0" style="flex:1;">
+                        <input type="range" id="fineTuneZ" min="-100" max="100" value="0" style="flex:1;">
                         <span id="fineTuneZVal"
                             style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
                     </div>
@@ -2249,23 +2263,43 @@
                 document.getElementById('fineTuneZVal').innerText = initZ;
             }
 
+            // 배율 변경 시 슬라이더 전체 리셋 (혼선 방지)
+            document.querySelectorAll('input[name="ftScale"]').forEach(radio => {
+                radio.addEventListener('change', function () {
+                    ['X', 'Y', 'Z'].forEach(axis => {
+                        document.getElementById(`fineTune${axis}`).value = 0;
+                        document.getElementById(`fineTune${axis}Val`).innerText = '0';
+                    });
+                    // 리셋 시 현재 관절 위치를 새 기준점으로 갱신
+                    if (selectedPointIndex3D !== -1) {
+                        const kps = personDataList[activePersonIndex].rawPose.keypoints;
+                        activeJointInitX = kps[selectedPointIndex3D].x;
+                        activeJointInitY = kps[selectedPointIndex3D].y;
+                    }
+                });
+            });
+
             ['X', 'Y', 'Z'].forEach(axis => {
                 document.getElementById(`fineTune${axis}`).addEventListener('input', function (e) {
                     if (selectedPointIndex3D === -1) return;
-                    const val = parseInt(e.target.value);
-                    document.getElementById(`fineTune${axis}Val`).innerText = val;
+
+                    const sliderVal = parseInt(e.target.value);
+                    const scaleEl = document.querySelector('input[name="ftScale"]:checked');
+                    const scale = scaleEl ? parseInt(scaleEl.value) : 1;
+                    const actualOffset = sliderVal * scale; // 실제 픽셀 이동량
+
+                    // 표시값은 실제 이동량으로 보여줌
+                    document.getElementById(`fineTune${axis}Val`).innerText = actualOffset;
 
                     const kps = personDataList[activePersonIndex].rawPose.keypoints;
-                    if (axis === 'X') kps[selectedPointIndex3D].x = activeJointInitX + val;
-                    if (axis === 'Y') kps[selectedPointIndex3D].y = activeJointInitY + val;
-                    if (axis === 'Z') kps[selectedPointIndex3D].zOffset = val;
+                    if (axis === 'X') kps[selectedPointIndex3D].x = activeJointInitX + actualOffset;
+                    if (axis === 'Y') kps[selectedPointIndex3D].y = activeJointInitY + actualOffset;
+                    if (axis === 'Z') kps[selectedPointIndex3D].zOffset = actualOffset;
 
                     kps[selectedPointIndex3D].score = 1.0;
                     render3DModal();
                 });
             });
-
-
 
 
             const open3DModalBtn = document.getElementById('open3DModalBtn');
