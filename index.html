@@ -2327,7 +2327,7 @@
                 const kps = personDataList[activePersonIndex].rawPose.keypoints;
                 if (!kps) return;
 
-                // 1. 원본 슬라이더 엘리먼트 값 및 라디안 변환 규칙 100% 유지
+                // 슬라이더 값 호출
                 const camYawDeg = parseFloat(document.getElementById('camYawSlider')?.value || 0);
                 const trunkYawDeg = parseFloat(document.getElementById('trunkYawSlider')?.value || 0);
                 const neckYawDeg = parseFloat(document.getElementById('neckYawSlider')?.value || 0);
@@ -2336,12 +2336,15 @@
                 const radTrunk = trunkYawDeg * Math.PI / 180;
                 const radNeck = neckYawDeg * Math.PI / 180;
 
-                const Z_DIR = isFacingRight ? -1 : 1;
+                // 🚨 수정 포인트 1: 전역 변수 참조 에러 방지 (변수가 없으면 기본값 1 적용)
+                const Z_DIR = (typeof isFacingRight !== 'undefined' && isFacingRight) ? -1 : 1;
 
-                // 2. 🌟 [신규 추가] 2D 화면 내 사람의 경계 상자(Bounding Box) 및 가운뎃점 계산 (가까운 사람 보정용)
+                // 바운딩 박스 계산
                 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
                 kps.forEach(kp => {
-                    if (kp.score > 0.1) {
+                    // 🚨 수정 포인트 2: score 값이 없어도 무조건 그리도록 기본값(1.0) 부여
+                    const conf = kp.score !== undefined ? kp.score : 1.0;
+                    if (conf > 0.1) {
                         if (kp.x < minX) minX = kp.x;
                         if (kp.x > maxX) maxX = kp.x;
                         if (kp.y < minY) minY = kp.y;
@@ -2349,41 +2352,39 @@
                     }
                 });
 
+                // 안전장치
                 if (minX === Infinity) { minX = 0; maxX = canvas.width; minY = 0; maxY = canvas.height; }
 
-                const personX = (minX + maxX) / 2; // 2D 이미지 속 사람의 중심 X
-                const personY = (minY + maxY) / 2; // 2D 이미지 속 사람의 중심 Y
+                const personX = (minX + maxX) / 2;
+                const personY = (minY + maxY) / 2;
                 const personWidth = maxX - minX || 1;
                 const personHeight = maxY - minY || 1;
 
-                // 480x480으로 커진 3D 캔버스 공간에 안정적으로 들어오도록 타겟 스케일 비율 도출 (65% 크기 배정)
                 const targetSize = Math.min(canvas.width, canvas.height) * 0.65;
                 const personScale = targetSize / Math.max(personWidth, personHeight);
 
-                // 3. 🛡️ [원본 공식 복원] 실시간 어깨 및 골반 너비 기반의 3D 입체 깊이(Z) 추정 수식
-                let baseShoulderWidth = Math.abs(kps[5].x - kps[6].x);
+                // 🚨 수정 포인트 3: 특정 관절 데이터가 누락되었을 때의 에러 방지 (? 연산자 추가)
+                let baseShoulderWidth = Math.abs((kps[5]?.x || 0) - (kps[6]?.x || 0));
                 if (baseShoulderWidth < 10) baseShoulderWidth = 50;
                 let zLeftShoulder = -(baseShoulderWidth / 2) * Math.sin(radTrunk) * Z_DIR;
                 let zRightShoulder = (baseShoulderWidth / 2) * Math.sin(radTrunk) * Z_DIR;
 
-                let baseHipWidth = Math.abs(kps[11].x - kps[12].x);
+                let baseHipWidth = Math.abs((kps[11]?.x || 0) - (kps[12]?.x || 0));
                 if (baseHipWidth < 10) baseHipWidth = 50;
                 let zLeftHip = -(baseHipWidth / 2) * Math.sin(radTrunk) * Z_DIR;
                 let zRightHip = (baseHipWidth / 2) * Math.sin(radTrunk) * Z_DIR;
 
-                // 4. 캔버스 배경 클리어 및 초기화
+                // 캔버스 초기화
                 ctx.clearRect(0, 0, canvas.width, canvas.height);
                 ctx.fillStyle = '#1e1e1e';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-                // 5. 각 관절의 3D 회전 및 화면 정중앙 변환 연산
+                // 3D 회전 및 화면 정중앙 변환 연산
                 rotatedPoints3D = kps.map((pt, idx) => {
-                    // [중앙 정렬] 하드코딩된 'x - 250' 대신 동적 중심점 차감 후 스케일 배율 곱하기
                     let x = (pt.x - personX) * personScale;
                     let y = (pt.y - personY) * personScale;
                     let z = 0;
 
-                    // 원본 인덱스별 Z값 상속 및 추정 규칙 유지
                     if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;
                     else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder;
                     else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;
@@ -2392,45 +2393,39 @@
                     if (idx === 0) z = 35 * Z_DIR;
                     else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
 
-                    // 🌟 [Z축 보정] 2D 픽셀 크기에 맞춰 커졌던 Z축 깊이도 현재 스케일에 맞게 비례 축소/확대하여 왜곡 방지
                     z = z * personScale;
 
-                    // 수동 미세조정 패널 오프셋 적용
                     if (pt.zOffset !== undefined) {
                         z += pt.zOffset;
                     }
 
-                    // 원본의 Y축 기준 회전 행렬 수식 완벽 보존
                     let rx = x, ry = y, rz = z;
 
-                    // 목/머리 영역 분리 회전 (0~4번 관절)
                     if (idx >= 0 && idx <= 4) {
                         let cosN = Math.cos(radNeck), sinN = Math.sin(radNeck);
                         let tx = rx * cosN - rz * sinN;
                         let tz = rx * sinN + rz * cosN;
                         rx = tx; rz = tz;
                     } else {
-                        // 몸통 및 사지 회전 (5~16번 관절)
                         let cosT = Math.cos(radTrunk), sinT = Math.sin(radTrunk);
                         let tx = rx * cosT - rz * sinT;
                         let tz = rx * sinT + rz * cosT;
                         rx = tx; rz = tz;
                     }
 
-                    // 카메라 전체 시점 회전
                     let cosC = Math.cos(radCam), sinC = Math.sin(radCam);
                     let finalX = rx * cosC - rz * sinC;
                     let finalZ = rx * sinC + rz * cosC;
 
-                    // 계산 완료된 로컬 좌표를 확장된 3D 캔버스의 정확한 '정중앙' 화면 좌표로 최종 배치
                     return {
                         x: finalX + (canvas.width / 2),
                         y: ry + (canvas.height / 2),
-                        score: pt.score
+                        // 🚨 수정 포인트 4: 리턴 객체에도 score 보장
+                        score: pt.score !== undefined ? pt.score : 1.0
                     };
                 });
 
-                // 6. 뼈대 연결선(스켈레톤 링크) 그리기 규칙 (원본 14개 링크 구조 100% 유지)
+                // 뼈대 연결선 그리기
                 const connections = [
                     [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
                     [5, 11], [6, 12], [11, 12],
@@ -2451,21 +2446,19 @@
                     }
                 });
 
-                // 7. 🌟 [신규 수정] 관절 포인트 렌더링 및 키보드 Tab 선택 강조 효과 구현
+                // 관절 포인트 렌더링 및 강조 효과
                 rotatedPoints3D.forEach((p, idx) => {
                     if (p.score > 0.1) {
                         ctx.beginPath();
 
-                        // 키보드 Tab 키나 마우스로 선택한 활성 관절(selectedPointIndex3D)인 경우 노란색 원으로 하이라이트
                         if (idx === selectedPointIndex3D) {
-                            ctx.arc(p.x, p.y, 9, 0, 2 * Math.PI); // 가시성 확보를 위해 반지름 9로 확대
-                            ctx.fillStyle = '#f1c40f';           // 선명한 노란색
-                            ctx.strokeStyle = '#ffffff';         // 흰색 외곽 테두리선 추가
+                            ctx.arc(p.x, p.y, 9, 0, 2 * Math.PI);
+                            ctx.fillStyle = '#f1c40f';
+                            ctx.strokeStyle = '#ffffff';
                             ctx.lineWidth = 2;
                             ctx.fill();
                             ctx.stroke();
                         } else {
-                            // 일반 관절 포인트는 원본 스펙 그대로 빨간색 렌더링
                             ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
                             ctx.fillStyle = 'red';
                             ctx.fill();
