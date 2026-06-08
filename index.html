@@ -2318,71 +2318,82 @@
                 });
             });
 
+            // 🌟 3D 스켈레톤 및 운동학(Kinematics) 체인 회전 적용 함수
             function render3DModal() {
                 const canvas = document.getElementById('canvas3DModal');
-                if (!canvas) return;
                 const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                if (activePersonIndex === -1 || !personDataList[activePersonIndex]) return;
-                const kps = personDataList[activePersonIndex].rawPose.keypoints;
-                if (!kps) return;
+                const person = personDataList[activePersonIndex];
+                const kps = person.rawPose.keypoints;
 
-                // 슬라이더 값 호출
-                const camYawDeg = parseFloat(document.getElementById('camYawSlider')?.value || 0);
-                const trunkYawDeg = parseFloat(document.getElementById('trunkYawSlider')?.value || 0);
-                const neckYawDeg = parseFloat(document.getElementById('neckYawSlider')?.value || 0);
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
 
-                const radCam = camYawDeg * Math.PI / 180;
-                const radTrunk = trunkYawDeg * Math.PI / 180;
-                const radNeck = neckYawDeg * Math.PI / 180;
+                const lh = kps[11], rh = kps[12], ls = kps[5], rs = kps[6];
+                if (!lh || !rh || !ls || !rs) return;
 
-                // 🚨 수정 포인트 1: 전역 변수 참조 에러 방지 (변수가 없으면 기본값 1 적용)
-                const Z_DIR = (typeof isFacingRight !== 'undefined' && isFacingRight) ? -1 : 1;
+                const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
+                const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
 
-                // 바운딩 박스 계산
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                kps.forEach(kp => {
-                    // 🚨 수정 포인트 2: score 값이 없어도 무조건 그리도록 기본값(1.0) 부여
-                    const conf = kp.score !== undefined ? kp.score : 1.0;
-                    if (conf > 0.1) {
-                        if (kp.x < minX) minX = kp.x;
-                        if (kp.x > maxX) maxX = kp.x;
-                        if (kp.y < minY) minY = kp.y;
-                        if (kp.y > maxY) maxY = kp.y;
+                const deltaCamYaw = modalCamYaw - (person.camYaw || 0);
+                const deltaTrunkYaw = modalTrunkYaw - (person.trunkYaw || 0);
+                const deltaNeckYaw = modalNeckYaw - (person.neckYaw || 0);
+
+                const camRad = -(deltaCamYaw * Math.PI) / 180;
+                const trunkRad = -(deltaTrunkYaw * Math.PI) / 180;
+                const neckRad = -(deltaNeckYaw * Math.PI) / 180;
+
+                // 🌟 [수정 1] 2D 패널 상태를 기준으로 고정된(Baseline) 방향성 확립
+                const rightLeg = !!person.angles[5];
+                const leftLeg = !!person.angles[9];
+                const rightArm = !!person.angles[2] || !!person.angles[3];
+                const leftArm = !!person.angles[6] || !!person.angles[7];
+
+                let isRightCloserBaseline = true;
+                if (leftLeg && !rightLeg) isRightCloserBaseline = false;
+                else if (rightLeg && !leftLeg) isRightCloserBaseline = true;
+                else if (leftArm && !rightArm) isRightCloserBaseline = false;
+                else if (rightArm && !leftArm) isRightCloserBaseline = true;
+                else {
+                    // 🌟 [버그 수정 완료!] 양측이 모두 있을 경우, AI가 감지한 신뢰도(Score)로 앞뒤를 정확히 판별합니다.
+                    const lScore = (kps[5].score + kps[7].score + kps[11].score);
+                    const rScore = (kps[6].score + kps[8].score + kps[12].score);
+                    isRightCloserBaseline = rScore >= lScore;
+                }
+
+                const Z_DIR = -1;
+
+                let maxBone = 50;
+                const bones = [[11, 13], [12, 14], [5, 11], [6, 12]];
+                bones.forEach(b => {
+                    const p1 = kps[b[0]], p2 = kps[b[1]];
+                    if (p1 && p2 && p1.score > 0.1 && p2.score > 0.1) {
+                        const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                        if (dist > maxBone) maxBone = dist;
                     }
                 });
 
-                // 안전장치
-                if (minX === Infinity) { minX = 0; maxX = canvas.width; minY = 0; maxY = canvas.height; }
+                const idealShoulderW = Math.max(maxBone * 0.8, 50);
+                const idealHipW = Math.max(maxBone * 0.6, 40);
 
-                const personX = (minX + maxX) / 2;
-                const personY = (minY + maxY) / 2;
-                const personWidth = maxX - minX || 1;
-                const personHeight = maxY - minY || 1;
+                const actualShoulderW = Math.abs(rs.x - ls.x);
+                const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
+                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
 
-                const targetSize = Math.min(canvas.width, canvas.height) * 0.65;
-                const personScale = targetSize / Math.max(personWidth, personHeight);
+                const actualHipW = Math.abs(rh.x - lh.x);
+                const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
+                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
 
-                // 🚨 수정 포인트 3: 특정 관절 데이터가 누락되었을 때의 에러 방지 (? 연산자 추가)
-                let baseShoulderWidth = Math.abs((kps[5]?.x || 0) - (kps[6]?.x || 0));
-                if (baseShoulderWidth < 10) baseShoulderWidth = 50;
-                let zLeftShoulder = -(baseShoulderWidth / 2) * Math.sin(radTrunk) * Z_DIR;
-                let zRightShoulder = (baseShoulderWidth / 2) * Math.sin(radTrunk) * Z_DIR;
+                const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
-                let baseHipWidth = Math.abs((kps[11]?.x || 0) - (kps[12]?.x || 0));
-                if (baseHipWidth < 10) baseHipWidth = 50;
-                let zLeftHip = -(baseHipWidth / 2) * Math.sin(radTrunk) * Z_DIR;
-                let zRightHip = (baseHipWidth / 2) * Math.sin(radTrunk) * Z_DIR;
+                const zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
-                // 캔버스 초기화
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.fillStyle = '#1e1e1e';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                // 3D 회전 및 화면 정중앙 변환 연산
                 rotatedPoints3D = kps.map((pt, idx) => {
-                    let x = (pt.x - personX) * personScale;
-                    let y = (pt.y - personY) * personScale;
+                    let x = pt.x;
+                    let y = pt.y;
                     let z = 0;
 
                     if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;
@@ -2393,97 +2404,41 @@
                     if (idx === 0) z = 35 * Z_DIR;
                     else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
 
-                    z = z * personScale;
+                    if (pt.zOffset !== undefined) z += pt.zOffset;
 
-                    if (pt.zOffset !== undefined) {
-                        z += pt.zOffset;
+                    let finalX = x, finalZ = z;
+
+                    if (idx <= 4) {
+                        let rx = finalX - shoulderMid.x;
+                        let rz = finalZ;
+                        finalX = rx * Math.cos(neckRad) - rz * Math.sin(neckRad) + shoulderMid.x;
+                        finalZ = rx * Math.sin(neckRad) + rz * Math.cos(neckRad);
                     }
 
-                    let rx = x, ry = y, rz = z;
-
-                    if (idx >= 0 && idx <= 4) {
-                        let cosN = Math.cos(radNeck), sinN = Math.sin(radNeck);
-                        let tx = rx * cosN - rz * sinN;
-                        let tz = rx * sinN + rz * cosN;
-                        rx = tx; rz = tz;
-                    } else {
-                        let cosT = Math.cos(radTrunk), sinT = Math.sin(radTrunk);
-                        let tx = rx * cosT - rz * sinT;
-                        let tz = rx * sinT + rz * cosT;
-                        rx = tx; rz = tz;
+                    if (idx <= 10) {
+                        let rx = finalX - pelvisMid.x;
+                        let rz = finalZ;
+                        finalX = rx * Math.cos(trunkRad) - rz * Math.sin(trunkRad) + pelvisMid.x;
+                        finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
                     }
 
-                    let cosC = Math.cos(radCam), sinC = Math.sin(radCam);
-                    let finalX = rx * cosC - rz * sinC;
-                    let finalZ = rx * sinC + rz * cosC;
+                    let rx = finalX - pelvisMid.x;
+                    let rz = finalZ;
+                    finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
+                    finalZ = rx * Math.sin(camRad) + rz * Math.cos(camRad);
 
                     return {
-                        x: finalX + (canvas.width / 2),
-                        y: ry + (canvas.height / 2),
-                        // 🚨 수정 포인트 4: 리턴 객체에도 score 보장
-                        score: pt.score !== undefined ? pt.score : 1.0
+                        rawX: finalX,
+                        rawY: y,
+                        x: (finalX - pelvisMid.x) + (canvas.width / 2),
+                        y: (y - pelvisMid.y) + (canvas.height / 2),
+                        z: finalZ,
+                        score: pt.score
                     };
                 });
 
-                // 6. 뼈대 연결선 그리기 (좌우 색상 분리 복원)
-    const connections = [
-        [5, 6], [5, 7], [7, 9], [6, 8], [8, 10],
-        [5, 11], [6, 12], [11, 12],
-        [11, 13], [13, 15], [12, 14], [14, 16],
-        [0, 5], [0, 6]
-    ];
-
-    connections.forEach(([p1, p2]) => {
-        const pt1 = rotatedPoints3D[p1];
-        const pt2 = rotatedPoints3D[p2];
-        if (pt1 && pt2 && pt1.score > 0.1 && pt2.score > 0.1) {
-            ctx.beginPath();
-            ctx.moveTo(pt1.x, pt1.y);
-            ctx.lineTo(pt2.x, pt2.y);
-            
-            // 🎨 좌우 선 색상 판별 로직 복원
-            // 홀수(1,3,5,7...)는 좌측, 짝수(2,4,6,8...)는 우측
-            if (p1 % 2 !== 0 && p2 % 2 !== 0 && p1 >= 5) {
-                ctx.strokeStyle = '#2ecc71'; // 좌측 뼈대 (밝은 녹색)
-            } else if (p1 % 2 === 0 && p2 % 2 === 0 && p1 >= 6) {
-                ctx.strokeStyle = '#e67e22'; // 우측 뼈대 (밝은 주황색)
-            } else {
-                ctx.strokeStyle = '#bdc3c7'; // 중앙 교차 뼈대 (어깨선, 골반선 등 회색)
-            }
-            
-            ctx.lineWidth = 3;
-            ctx.stroke();
-        }
-    });
-
-    // 7. 관절 포인트 렌더링 및 강조 효과 (좌우 색상 분리 복원)
-    rotatedPoints3D.forEach((p, idx) => {
-        if (p.score > 0.1) {
-            ctx.beginPath();
-            
-            // 🎯 선택된 관절은 노란색으로 강조 (유지)
-            if (idx === selectedPointIndex3D) {
-                ctx.arc(p.x, p.y, 9, 0, 2 * Math.PI); 
-                ctx.fillStyle = '#f1c40f';           
-                ctx.strokeStyle = '#ffffff';         
-                ctx.lineWidth = 2;
-                ctx.fill();
-                ctx.stroke();
-            } else {
-                // 🎨 좌우 관절 점 색상 판별 로직 복원
-                ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
-                
-                if (idx === 0) {
-                    ctx.fillStyle = '#9b59b6'; // 0번 중심(목/코) - 보라색
-                } else if (idx % 2 !== 0) {
-                    ctx.fillStyle = '#27ae60'; // 홀수(좌측 관절) - 진한 녹색
-                } else {
-                    ctx.fillStyle = '#d35400'; // 짝수(우측 관절) - 진한 주황색
-                }
-                ctx.fill();
-            }
-        }
-    });
+                drawSkeletonLayers(rotatedPoints3D, ctx, "background");
+                drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
             }
 
             function drawSkeletonLayers(points, ctx, layerType) {
