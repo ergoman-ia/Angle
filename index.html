@@ -2392,73 +2392,73 @@
                 const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
                 // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
-const rawPoints = kps.map((pt, idx) => {
-    let x = pt.x;
-    let y = pt.y;
-    let z = 0;
+                const rawPoints = kps.map((pt, idx) => {
+                    let x = pt.x;
+                    let y = pt.y;
+                    let z = 0;
 
-    // (기존 z 초기화 및 zOffset 적용 로직 그대로 유지)
-    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;
-    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder;
-    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;
-    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;
-    if (idx === 0) z = 35 * Z_DIR;
-    else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
-    if (pt.zOffset !== undefined) z += pt.zOffset;
+                    // (기존 z 초기화 및 zOffset 적용 로직 그대로 유지)
+                    if (idx === 5 || idx === 7 || idx === 9) z = zLeftShoulder;
+                    else if (idx === 6 || idx === 8 || idx === 10) z = zRightShoulder;
+                    else if (idx === 11 || idx === 13 || idx === 15) z = zLeftHip;
+                    else if (idx === 12 || idx === 14 || idx === 16) z = zRightHip;
+                    if (idx === 0) z = 35 * Z_DIR;
+                    else if (idx >= 1 && idx <= 4) z = 10 * Z_DIR;
+                    if (pt.zOffset !== undefined) z += pt.zOffset;
 
-    let finalX = x, finalZ = z;
+                    let finalX = x, finalZ = z;
 
-    // (기존 목·몸통·카메라 회전 로직 그대로 유지)
-    if (idx <= 4) {
-        let rx = finalX - shoulderMid.x;
-        let rz = finalZ;
-        finalX = rx * Math.cos(neckRad) - rz * Math.sin(neckRad) + shoulderMid.x;
-        finalZ = rx * Math.sin(neckRad) + rz * Math.cos(neckRad);
-    }
-    if (idx <= 10) {
-        let rx = finalX - pelvisMid.x;
-        let rz = finalZ;
-        finalX = rx * Math.cos(trunkRad) - rz * Math.sin(trunkRad) + pelvisMid.x;
-        finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
-    }
-    let rx = finalX - pelvisMid.x;
-    let rz = finalZ;
-    finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
-    finalZ = rx * Math.sin(camRad) + rz * Math.cos(camRad);
+                    // (기존 목·몸통·카메라 회전 로직 그대로 유지)
+                    if (idx <= 4) {
+                        let rx = finalX - shoulderMid.x;
+                        let rz = finalZ;
+                        finalX = rx * Math.cos(neckRad) - rz * Math.sin(neckRad) + shoulderMid.x;
+                        finalZ = rx * Math.sin(neckRad) + rz * Math.cos(neckRad);
+                    }
+                    if (idx <= 10) {
+                        let rx = finalX - pelvisMid.x;
+                        let rz = finalZ;
+                        finalX = rx * Math.cos(trunkRad) - rz * Math.sin(trunkRad) + pelvisMid.x;
+                        finalZ = rx * Math.sin(trunkRad) + rz * Math.cos(trunkRad);
+                    }
+                    let rx = finalX - pelvisMid.x;
+                    let rz = finalZ;
+                    finalX = rx * Math.cos(camRad) - rz * Math.sin(camRad) + pelvisMid.x;
+                    finalZ = rx * Math.sin(camRad) + rz * Math.cos(camRad);
 
-    return { rawX: finalX, rawY: y, z: finalZ, score: pt.score };
-});
+                    return { rawX: finalX, rawY: y, z: finalZ, score: pt.score };
+                });
 
-// ── 2단계: 유효 점들의 bounding box → 자동 스케일·센터링 ──
-const PADDING = 50; // 캔버스 여백 (px)
-const validPts = rawPoints.filter(p => p.score > 0.1);
+                // ── 2단계: 유효 점들의 bounding box → 자동 스케일·센터링 ──
+                const PADDING = 50; // 캔버스 여백 (px)
+                const validPts = rawPoints.filter(p => p.score > 0.1);
 
-let minRX = Infinity, maxRX = -Infinity, minRY = Infinity, maxRY = -Infinity;
-validPts.forEach(p => {
-    if (p.rawX < minRX) minRX = p.rawX;
-    if (p.rawX > maxRX) maxRX = p.rawX;
-    if (p.rawY < minRY) minRY = p.rawY;
-    if (p.rawY > maxRY) maxRY = p.rawY;
-});
+                let minRX = Infinity, maxRX = -Infinity, minRY = Infinity, maxRY = -Infinity;
+                validPts.forEach(p => {
+                    if (p.rawX < minRX) minRX = p.rawX;
+                    if (p.rawX > maxRX) maxRX = p.rawX;
+                    if (p.rawY < minRY) minRY = p.rawY;
+                    if (p.rawY > maxRY) maxRY = p.rawY;
+                });
 
-const rangeX = (maxRX - minRX) || 1;
-const rangeY = (maxRY - minRY) || 1;
-const scale = Math.min(
-    (canvas.width  - PADDING * 2) / rangeX,
-    (canvas.height - PADDING * 2) / rangeY
-);
+                const rangeX = (maxRX - minRX) || 1;
+                const rangeY = (maxRY - minRY) || 1;
+                const scale = Math.min(
+                    (canvas.width - PADDING * 2) / rangeX,
+                    (canvas.height - PADDING * 2) / rangeY
+                );
 
-const centerRawX = (minRX + maxRX) / 2;
-const centerRawY = (minRY + maxRY) / 2;
+                const centerRawX = (minRX + maxRX) / 2;
+                const centerRawY = (minRY + maxRY) / 2;
 
-rotatedPoints3D = rawPoints.map(p => ({
-    rawX: p.rawX,
-    rawY: p.rawY,
-    x: (p.rawX - centerRawX) * scale + canvas.width  / 2,  // ✅ 자동 스케일+센터링
-    y: (p.rawY - centerRawY) * scale + canvas.height / 2,  // ✅ 자동 스케일+센터링
-    z: p.z,
-    score: p.score
-}));
+                rotatedPoints3D = rawPoints.map(p => ({
+                    rawX: p.rawX,
+                    rawY: p.rawY,
+                    x: (p.rawX - centerRawX) * scale + canvas.width / 2,  // ✅ 자동 스케일+센터링
+                    y: (p.rawY - centerRawY) * scale + canvas.height / 2,  // ✅ 자동 스케일+센터링
+                    z: p.z,
+                    score: p.score
+                }));
 
                 drawSkeletonLayers(rotatedPoints3D, ctx, "background");
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
