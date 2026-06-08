@@ -478,6 +478,7 @@
                         <label style="font-size:12px; cursor:pointer;">
                             <input type="radio" name="ftScale" value="5"> ×5 <span style="color:#888;">(크게)</span>
                         </label>
+
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <label style="font-size:12px; font-weight:bold; min-width: 70px; color:#555;">X축(좌/우):</label>
@@ -655,26 +656,6 @@
                 }
             }
             loadModel();
-
-            // BlazePose Lite 로드 (3D Z좌표 추출 전용)
-            async function loadBlazePose3D() {
-                try {
-                    detector3D = await poseDetection.createDetector(
-                        poseDetection.SupportedModels.BlazePose,
-                        {
-                            runtime: 'tfjs',
-                            modelType: 'lite',       // lite: 빠름 / heavy: 정확
-                            enableSmoothing: false,
-                            enableSegmentation: false,
-                        }
-                    );
-                    console.log('BlazePose 3D 준비 완료');
-                } catch (e) {
-                    console.warn('BlazePose 로드 실패 → 기하학적 Z 추정 사용:', e);
-                    detector3D = null;
-                }
-            }
-            loadBlazePose3D(); // 기존 loadModel(); 호출 바로 다음 줄에 추가
 
             window.onload = function () {
                 ctx.fillStyle = '#eeeeee';
@@ -2253,27 +2234,6 @@
 
             const NON_SELECTABLE_JOINTS = [1, 2];
 
-            // BlazePose(33개) → MoveNet(17개) 인덱스 매핑표
-            const BLAZEPOSE_TO_MOVENET = {
-                0: 0,   // 코 → 코
-                7: 3,   // 왼쪽 귀 → 왼쪽 귀
-                8: 4,   // 오른쪽 귀 → 오른쪽 귀
-                11: 5,  // 왼쪽 어깨
-                12: 6,  // 오른쪽 어깨
-                13: 7,  // 왼쪽 팔꿈치
-                14: 8,  // 오른쪽 팔꿈치
-                15: 9,  // 왼쪽 손목
-                16: 10, // 오른쪽 손목
-                23: 11, // 왼쪽 골반
-                24: 12, // 오른쪽 골반
-                25: 13, // 왼쪽 무릎
-                26: 14, // 오른쪽 무릎
-                27: 15, // 왼쪽 발목
-                28: 16, // 오른쪽 발목
-            };
-
-            let detector3D = null; // BlazePose 전용 detector
-
             // 👇 신규 추가: 관절 맵핑 및 미세조정 로직
             const JOINT_NAMES = {
                 0: "얼굴(목) 중심", 1: "왼쪽 눈", 2: "오른쪽 눈", 3: "왼쪽 귀", 4: "오른쪽 귀",
@@ -2553,68 +2513,6 @@
                 drawSkeletonLayers(rotatedPoints3D, ctx, "background");
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
             }
-
-            // BlazePose로 현재 작업자의 실제 Z(깊이) 좌표를 추출하여 kps에 z3D 속성으로 저장
-            async function enrichWith3DPose(person) {
-                if (!detector3D || !img.src || img.width === 0) return;
-                const kps = person.rawPose.keypoints;
-                const validKps = kps.filter(k => k.score > 0.1);
-                if (validKps.length < 4) return;
-
-                // 작업자 영역 크롭
-                const margin = 40;
-                const xs = validKps.map(k => k.x);
-                const ys = validKps.map(k => k.y);
-                const srcX = Math.max(0, Math.min(...xs) - margin);
-                const srcY = Math.max(0, Math.min(...ys) - margin);
-                const srcW = Math.min(img.width - srcX, Math.max(...xs) - srcX + margin * 2);
-                const srcH = Math.min(img.height - srcY, Math.max(...ys) - srcY + margin * 2);
-                if (srcW < 50 || srcH < 50) return;
-
-                const offCanvas = document.createElement('canvas');
-                offCanvas.width = srcW; offCanvas.height = srcH;
-                offCanvas.getContext('2d').drawImage(img, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
-
-                try {
-                    const poses = await detector3D.estimatePoses(offCanvas);
-                    if (!poses.length || !poses[0].keypoints3D) {
-                        person.has3DPose = false; return;
-                    }
-                    const kps3D = poses[0].keypoints3D; // BlazePose 3D 정규화 좌표
-
-                    // Z 스케일 계산: 정규화 좌표 → 픽셀 좌표 변환 비율
-                    // 기준: 몸통 세로 길이(골반~어깨) 픽셀 vs 정규화 값
-                    const lh = kps[11], rh = kps[12], ls = kps[5], rs = kps[6];
-                    if (!lh || !rh || !ls || !rs) { person.has3DPose = false; return; }
-                    const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
-                    const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
-                    const torsoPixels = Math.hypot(shoulderMid.x - pelvisMid.x, shoulderMid.y - pelvisMid.y);
-
-                    // BlazePose 정규화 좌표계의 몸통 길이 (인덱스: 23=왼골반, 11=왼어깨)
-                    const bp23 = kps3D[23], bp11 = kps3D[11];
-                    const torsoNorm = (bp23 && bp11)
-                        ? Math.hypot(bp11.x - bp23.x, bp11.y - bp23.y)
-                        : 0.3; // 감지 실패 시 기본값
-                    const zScale = torsoPixels / (torsoNorm || 0.3);
-
-                    // BlazePose 33개 → MoveNet 17개 Z값 매핑
-                    Object.entries(BLAZEPOSE_TO_MOVENET).forEach(([bpIdxStr, mnIdx]) => {
-                        const bp = kps3D[parseInt(bpIdxStr)];
-                        if (bp && kps[mnIdx]) {
-                            // BlazePose z: 음수 = 카메라 가까움 (전경)
-                            // zScale로 픽셀 스케일로 변환
-                            kps[mnIdx].z3D = bp.z * zScale;
-                        }
-                    });
-
-                    person.has3DPose = true;
-                    console.log('BlazePose Z 추출 성공');
-                } catch (e) {
-                    console.warn('BlazePose 추정 실패 → 기하학적 폴백:', e);
-                    person.has3DPose = false;
-                }
-            }
-
 
             function drawSkeletonLayers(points, ctx, layerType) {
                 // [수정됨] V자 선을 만들던 [0, 5], [0, 6] 제거
