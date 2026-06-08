@@ -2225,6 +2225,11 @@
             let modalCamYaw = 0, modalTrunkYaw = 0, modalNeckYaw = 0;
             let rotatedPoints3D = []; // 보정 후 좌표 임시 저장 배열
             let selectedPointIndex3D = -1;
+            let currentScale3D = 1;
+            let baselineKps3D = null;      // 모달 열릴 때 kps 스냅샷
+            let openingCamYaw = 0;       // 모달 열릴 때의 camYaw 기준값
+            let openingTrunkYaw = 0;
+            let openingNeckYaw = 0;
 
             const NON_SELECTABLE_JOINTS = [1, 2];
 
@@ -2336,6 +2341,11 @@
                     selectedPointIndex3D = 6;
                     updateFineTunePanel(6);
 
+                    openingCamYaw = person.camYaw || 0;
+                    openingTrunkYaw = person.trunkYaw || 0;
+                    openingNeckYaw = person.neckYaw || 0;
+                    baselineKps3D = JSON.parse(JSON.stringify(person.rawPose.keypoints));
+
                     render3DModal();
                 });
             }
@@ -2375,9 +2385,9 @@
                 const pelvisMid = { x: (lh.x + rh.x) / 2, y: (lh.y + rh.y) / 2 };
                 const shoulderMid = { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 };
 
-                const deltaCamYaw = modalCamYaw - (person.camYaw || 0);
-                const deltaTrunkYaw = modalTrunkYaw - (person.trunkYaw || 0);
-                const deltaNeckYaw = modalNeckYaw - (person.neckYaw || 0);
+                const deltaCamYaw = modalCamYaw - openingCamYaw;
+                const deltaTrunkYaw = modalTrunkYaw - openingTrunkYaw;
+                const deltaNeckYaw = modalNeckYaw - openingNeckYaw;
 
                 const camRad = -(deltaCamYaw * Math.PI) / 180;
                 const trunkRad = -(deltaTrunkYaw * Math.PI) / 180;
@@ -2418,11 +2428,11 @@
 
                 const actualShoulderW = Math.abs(rs.x - ls.x);
                 const dz2S = (idealShoulderW * idealShoulderW) - (actualShoulderW * actualShoulderW);
-                const dzS = dz2S > 0 ? Math.sqrt(dz2S) : 0;
+                const dzS = dz2S > 0 ? Math.min(Math.sqrt(dz2S), maxBone * 0.5) : 0;
 
                 const actualHipW = Math.abs(rh.x - lh.x);
                 const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
-                const dzH = dz2H > 0 ? Math.sqrt(dz2H) : 0;
+                const dzH = dz2H > 0 ? Math.min(Math.sqrt(dz2H), maxBone * 0.5) : 0;
 
                 const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
                 const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
@@ -2432,8 +2442,12 @@
 
                 // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
                 const rawPoints = kps.map((pt, idx) => {
-                    let x = pt.x;
-                    let y = pt.y;
+                    const base = baselineKps3D ? baselineKps3D[idx] : pt;
+                    // 드래그로 변경된 양 = 현재 kps - baseline
+                    const dragDx = pt.x - (baselineKps3D ? baselineKps3D[idx].x : pt.x);
+                    const dragDy = pt.y - (baselineKps3D ? baselineKps3D[idx].y : pt.y);
+                    let x = base.x + dragDx; // baseline + drag offset
+                    let y = base.y + dragDy;
                     let z = 0;
 
                     // (기존 z 초기화 및 zOffset 적용 로직 그대로 유지)
@@ -2486,6 +2500,7 @@
                     (canvas.width - PADDING * 2) / rangeX,
                     (canvas.height - PADDING * 2) / rangeY
                 );
+                currentScale3D = scale;
 
                 const centerRawX = (minRX + maxRX) / 2;
                 const centerRawY = (minRY + maxRY) / 2;
@@ -2757,8 +2772,8 @@
 
                 if (kps[modalDraggingIdx]) {
                     // 원본 X, Y 좌표에 이동량 반영
-                    kps[modalDraggingIdx].x += dx;
-                    kps[modalDraggingIdx].y += dy;
+                    kps[modalDraggingIdx].x += dx / currentScale3D;
+                    kps[modalDraggingIdx].y += dy / currentScale3D;
                     kps[modalDraggingIdx].score = 1.0; // 보정된 점 보호
 
                     if (modalDraggingIdx === selectedPointIndex3D) {
