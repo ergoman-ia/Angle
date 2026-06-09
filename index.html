@@ -2519,31 +2519,31 @@
 
                 const coordDisplay = document.getElementById('3d-coord-debug-panel'); 
                 if (coordDisplay) {
-                    // 모달 오픈 시 선택값이 없으면 '오른쪽 어깨(6)'를 기본값으로 고정
                     const targetIdx = selectedPointIndex3D !== -1 ? selectedPointIndex3D : 6;
-                    
-                    const pt = kps[targetIdx];
-                    if (pt) {
-                        const bodyParts = {
-                            0: '코(Nose)', 1: '왼쪽 눈', 2: '오른쪽 눈', 3: '왼쪽 귀', 4: '오른쪽 귀',
-                            5: '왼쪽 어깨', 6: '오른쪽 어깨', 7: '왼쪽 팔꿈치', 8: '오른쪽 팔꿈치',
-                            9: '왼쪽 손목', 10: '오른쪽 손목', 11: '왼쪽 골반', 12: '오른쪽 골반',
-                            13: '왼쪽 무릎', 14: '오른쪽 무릎', 15: '왼쪽 발목', 16: '오른쪽 발목'
-                        };
-                        const partName = bodyParts[targetIdx] || `관절 ${targetIdx}`;
-                        
-                        const dispX = pt.rawX !== undefined ? pt.rawX : pt.x;
-                        const dispY = pt.rawY !== undefined ? pt.rawY : pt.y;
-                        const dispZ = pt.zOffset !== undefined ? pt.zOffset : (pt.z || 0);
+// 🟢 원본 kps가 아닌, 회전과 Z축 연산이 모두 끝난 3D 배열을 참조합니다.
+const pt3D = rotatedPoints3D[targetIdx]; 
 
-                        // 요청하신 (x : ..., y : ..., z : ...) 포맷 적용
-                        coordDisplay.innerHTML = `
-                            <div style="font-size: 12px; color: #555; margin-bottom: 5px;">현재 선택된 부위: <span style="font-weight:bold; color:#007BFF">${partName}</span></div>
-                            <div style="font-size: 14px; font-weight: bold; color: #333;">
-                                (x : ${dispX.toFixed(1)}, y : ${dispY.toFixed(1)}, z : ${dispZ.toFixed(1)})
-                            </div>
-                        `;
-                    }
+if (pt3D) {
+    const bodyParts = {
+        0: '코(Nose)', 1: '왼쪽 눈', 2: '오른쪽 눈', 3: '왼쪽 귀', 4: '오른쪽 귀',
+        5: '왼쪽 어깨', 6: '오른쪽 어깨', 7: '왼쪽 팔꿈치', 8: '오른쪽 팔꿈치',
+        9: '왼쪽 손목', 10: '오른쪽 손목', 11: '왼쪽 골반', 12: '오른쪽 골반',
+        13: '왼쪽 무릎', 14: '오른쪽 무릎', 15: '왼쪽 발목', 16: '오른쪽 발목'
+    };
+    const partName = bodyParts[targetIdx] || `관절 ${targetIdx}`;
+    
+    // 🟢 pt3D 배열에는 이미 zOffset까지 모두 더해진 최종 z값이 들어있습니다.
+    const dispX = pt3D.rawX !== undefined ? pt3D.rawX : pt3D.x;
+    const dispY = pt3D.rawY !== undefined ? pt3D.rawY : pt3D.y;
+    const dispZ = pt3D.z !== undefined ? pt3D.z : 0;
+
+    coordDisplay.innerHTML = `
+        <div style="font-size: 12px; color: #555; margin-bottom: 5px;">현재 선택된 부위: <span style="font-weight:bold; color:#007BFF">${partName}</span></div>
+        <div style="font-size: 14px; font-weight: bold; color: #333;">
+            (x : ${dispX.toFixed(1)}, y : ${dispY.toFixed(1)}, z : ${dispZ.toFixed(1)})
+        </div>
+    `;
+}
                 }
 
                 // ========================================================
