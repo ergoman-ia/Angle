@@ -465,7 +465,7 @@
                     <div style="font-weight:bold; color:#333; margin-bottom: 5px; font-size: 13px;">
                         🎯 선택된 부위 조정: <span id="selectedJointName" style="color:#007BFF;">없음</span>
                     </div>
-                 
+
                     <div
                         style="display:flex; align-items:center; gap:6px; margin-bottom:6px; background:#fff; border:1px solid #ccc; border-radius:5px; padding:5px 8px;">
                         <span style="font-size:11px; font-weight:bold; color:#555; min-width:50px;">이동 배율:</span>
@@ -499,7 +499,8 @@
                         <span id="fineTuneZVal"
                             style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
                     </div>
-                    <div id="3d-coord-debug-panel" style="margin-top: 12px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; font-family: monospace; font-size: 13px; text-align: center; font-weight: bold;">
+                    <div id="3d-coord-debug-panel"
+                        style="margin-top: 12px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; font-family: monospace; font-size: 13px; text-align: center; font-weight: bold;">
                         <span style="color: #666;">미세 조정할 관절을 선택해 주세요.</span>
                     </div>
                 </div>
@@ -2434,11 +2435,27 @@
                 const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
                 const dzH = dz2H > 0 ? Math.min(Math.sqrt(dz2H), maxBone * 0.5) : 0;
 
-                const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
-                const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
+                // 1. 부호 변경을 위해 const를 let으로 변경합니다.
+                let zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                let zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
-                const zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
-                const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
+                // 🌟 [추가 로직] X축 역전 방지 (어깨)
+                // 작업자의 오른쪽 어깨(rs)가 왼쪽 어깨(ls)보다 화면상 우측에 있다면(x값이 크다면),
+                // 이는 뒤를 돌았거나 측면으로 심하게 틀어진 상태이므로 Z축 부호를 반전시켜 꼬임을 막습니다.
+                if (rs.x > ls.x) {
+                    zRightShoulder = -zRightShoulder;
+                    zLeftShoulder = -zLeftShoulder;
+                }
+
+                // 2. 골반도 동일하게 let으로 변경합니다.
+                let zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                let zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
+
+                // 🌟 [추가 로직] X축 역전 방지 (골반)
+                if (rh.x > lh.x) {
+                    zRightHip = -zRightHip;
+                    zLeftHip = -zLeftHip;
+                }
 
                 // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
                 const rawPoints = kps.map((pt, idx) => {
@@ -2517,33 +2534,34 @@
                 drawSkeletonLayers(rotatedPoints3D, ctx, "background");
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
 
-                const coordDisplay = document.getElementById('3d-coord-debug-panel'); 
+                const coordDisplay = document.getElementById('3d-coord-debug-panel');
                 if (coordDisplay) {
+                    // 모달 오픈 시 선택값이 없으면 '오른쪽 어깨(6)'를 기본값으로 고정
                     const targetIdx = selectedPointIndex3D !== -1 ? selectedPointIndex3D : 6;
-// 🟢 원본 kps가 아닌, 회전과 Z축 연산이 모두 끝난 3D 배열을 참조합니다.
-const pt3D = rotatedPoints3D[targetIdx]; 
+                    // 🟢 원본 kps가 아닌, 회전과 Z축 연산이 모두 끝난 3D 배열을 참조합니다.
+                    const pt3D = rotatedPoints3D[targetIdx];
 
-if (pt3D) {
-    const bodyParts = {
-        0: '코(Nose)', 1: '왼쪽 눈', 2: '오른쪽 눈', 3: '왼쪽 귀', 4: '오른쪽 귀',
-        5: '왼쪽 어깨', 6: '오른쪽 어깨', 7: '왼쪽 팔꿈치', 8: '오른쪽 팔꿈치',
-        9: '왼쪽 손목', 10: '오른쪽 손목', 11: '왼쪽 골반', 12: '오른쪽 골반',
-        13: '왼쪽 무릎', 14: '오른쪽 무릎', 15: '왼쪽 발목', 16: '오른쪽 발목'
-    };
-    const partName = bodyParts[targetIdx] || `관절 ${targetIdx}`;
-    
-    // 🟢 pt3D 배열에는 이미 zOffset까지 모두 더해진 최종 z값이 들어있습니다.
-    const dispX = pt3D.rawX !== undefined ? pt3D.rawX : pt3D.x;
-    const dispY = pt3D.rawY !== undefined ? pt3D.rawY : pt3D.y;
-    const dispZ = pt3D.z !== undefined ? pt3D.z : 0;
+                    if (pt3D) {
+                        const bodyParts = {
+                            0: '코(Nose)', 1: '왼쪽 눈', 2: '오른쪽 눈', 3: '왼쪽 귀', 4: '오른쪽 귀',
+                            5: '왼쪽 어깨', 6: '오른쪽 어깨', 7: '왼쪽 팔꿈치', 8: '오른쪽 팔꿈치',
+                            9: '왼쪽 손목', 10: '오른쪽 손목', 11: '왼쪽 골반', 12: '오른쪽 골반',
+                            13: '왼쪽 무릎', 14: '오른쪽 무릎', 15: '왼쪽 발목', 16: '오른쪽 발목'
+                        };
+                        const partName = bodyParts[targetIdx] || `관절 ${targetIdx}`;
 
-    coordDisplay.innerHTML = `
+                        // 🟢 pt3D 배열에는 이미 zOffset까지 모두 더해진 최종 z값이 들어있습니다.
+                        const dispX = pt3D.rawX !== undefined ? pt3D.rawX : pt3D.x;
+                        const dispY = pt3D.rawY !== undefined ? pt3D.rawY : pt3D.y;
+                        const dispZ = pt3D.z !== undefined ? pt3D.z : 0;
+
+                        coordDisplay.innerHTML = `
         <div style="font-size: 12px; color: #555; margin-bottom: 5px;">현재 선택된 부위: <span style="font-weight:bold; color:#007BFF">${partName}</span></div>
         <div style="font-size: 14px; font-weight: bold; color: #333;">
             (x : ${dispX.toFixed(1)}, y : ${dispY.toFixed(1)}, z : ${dispZ.toFixed(1)})
         </div>
     `;
-}
+                    }
                 }
 
                 // ========================================================
@@ -2588,9 +2606,9 @@ if (pt3D) {
                 }
 
                 // 축 그리기: X (빨강, 가로), Y (초록, 높이), Z (파랑, 깊이)
-                drawAxis(axisLen, 0, 0, '#d9534f', 'X'); 
-                drawAxis(0, axisLen, 0, '#28a745', 'Y'); 
-                drawAxis(0, 0, axisLen, '#007BFF', 'Z'); 
+                drawAxis(axisLen, 0, 0, '#d9534f', 'X');
+                drawAxis(0, axisLen, 0, '#28a745', 'Y');
+                drawAxis(0, 0, axisLen, '#007BFF', 'Z');
 
                 // 중심 원점
                 ctx.fillStyle = '#333';
@@ -2599,7 +2617,7 @@ if (pt3D) {
                 ctx.fill();
                 ctx.restore();
             }
-            
+
             function drawSkeletonLayers(points, ctx, layerType) {
                 // [수정됨] V자 선을 만들던 [0, 5], [0, 6] 제거
                 const connections = [
