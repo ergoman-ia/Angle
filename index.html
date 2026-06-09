@@ -2521,83 +2521,94 @@
                 // [안전 통합] 실시간 XYZ 좌표 피드백 및 회전 연동 3D 좌표축
                 // ========================================================
                 try {
-                    // 1. 활성화된 신체 부위 인덱스 판별 (선택이 없으면 기본값 6: 오른쪽 어깨)
+                    // 1. 활성화된 신체 부위 인덱스 판별 (기본값 6: 오른쪽 어깨)
                     let activeIdx = 6; 
                     if (typeof selectedPointIndex3D !== 'undefined' && selectedPointIndex3D !== -1) {
                         activeIdx = selectedPointIndex3D;
+                    } else if (typeof selectedJointIndex !== 'undefined' && selectedJointIndex !== -1) {
+                        activeIdx = selectedJointIndex;
+                    } else if (typeof currentJointIndex !== 'undefined' && currentJointIndex !== -1) {
+                        activeIdx = currentJointIndex;
                     }
 
-                    // 분석용 신체 부위 한글 매핑
+                    // Tab 키 이동 또는 포커스된 엘리먼트가 있을 경우 해당 인덱스 자동 추적
+                    const activeEl = document.activeElement;
+                    if (activeEl) {
+                        const dataIdx = activeEl.getAttribute('data-index') || activeEl.getAttribute('data-idx');
+                        const idNum = activeEl.id ? activeEl.id.match(/\d+/) : null;
+                        if (dataIdx && !isNaN(parseInt(dataIdx))) {
+                            activeIdx = parseInt(dataIdx);
+                        } else if (idNum && !isNaN(parseInt(idNum[0]))) {
+                            const parsed = parseInt(idNum[0]);
+                            if (parsed >= 0 && parsed <= 16) activeIdx = parsed;
+                        }
+                    }
+
+                    // 분석용 신체 부위 한글 매칭
                     const partNames = {
                         0: "코 (Nose)", 1: "왼쪽 눈", 2: "오른쪽 눈", 3: "왼쪽 귀", 4: "오른쪽 귀",
                         5: "왼쪽 어깨", 6: "오른쪽 어깨", 7: "왼쪽 팔꿈치", 8: "오른쪽 팔꿈치",
-                        9: "왼쪽 손목", 10: "오른쪽 손목", 11: "왼쪽 골반", 12: "오른쪽 골반"
+                        9: "왼쪽 손목", 10: "오른쪽 손목", 11: "왼쪽 골반", 12: "오른쪽 골반",
+                        13: "왼쪽 무릎", 14: "오른쪽 무릎", 15: "왼쪽 발목", 16: "오른쪽 발목"
                     };
-                    const currentPartName = partNames[activeIdx] || `부위 ${activeIdx}`;
+                    const currentPartName = partNames[activeIdx] || `관절 ${activeIdx}`;
 
-                    // 2. 하단 HTML 패널(currentCoordDisplay)에 실시간 좌표값 투영
-                    const coordDisplay = document.getElementById('currentCoordDisplay');
-                    if (coordDisplay) {
-                        let pt = null;
-                        if (typeof rotatedPoints3D !== 'undefined' && rotatedPoints3D[activeIdx]) {
-                            pt = rotatedPoints3D[activeIdx];
-                        } else if (typeof kps !== 'undefined' && kps[activeIdx]) {
-                            pt = kps[activeIdx];
-                        }
+                    // 2. 좌표 데이터를 안전하게 추출 (kps 원본 데이터 우선 참조)
+                    let pt = null;
+                    if (typeof kps !== 'undefined' && kps[activeIdx]) pt = kps[activeIdx];
+                    else if (typeof rotatedPoints3D !== 'undefined' && rotatedPoints3D[activeIdx]) pt = rotatedPoints3D[activeIdx];
+                    else if (window.kps && window.kps[activeIdx]) pt = window.kps[activeIdx];
 
-                        if (pt) {
-                            // 보정 및 수동 미세조정이 반영된 정확한 원본 차원 수치 추출
-                            const xVal = pt.rawX !== undefined ? pt.rawX : (pt.x || 0);
-                            const yVal = pt.rawY !== undefined ? pt.rawY : (pt.y || 0);
-                            const zVal = pt.zOffset !== undefined ? pt.zOffset : (pt.z || 0);
-
-                            coordDisplay.innerHTML = `
-                                <div style="font-size: 11px; color: #666; margin-bottom: 4px;">분석 대상: <span style="font-weight: bold; color: #000;">${currentPartName}</span></div>
-                                <div style="display: flex; justify-content: center; gap: 15px; font-weight: bold;">
-                                    <span style="color:#d9534f">X: ${xVal.toFixed(1)}</span>
-                                    <span style="color:#28a745">Y: ${yVal.toFixed(1)}</span>
-                                    <span style="color:#007BFF">Z: ${zVal.toFixed(1)}</span>
-                                </div>
-                            `;
-                        } else {
-                            coordDisplay.innerHTML = "좌표 데이터를 분석하는 중...";
-                        }
+                    // 3. 안내 문구 컨테이너 탐색 및 명시된 포맷으로 XYZ 수치 출력
+                    let coordDisplay = document.getElementById('currentCoordDisplay') || document.getElementById('3d-coord-debug-panel');
+                    if (!coordDisplay) {
+                        // ID가 명확하지 않을 경우 "미세 조정할 관절" 문구가 포함된 엘리먼트를 동적 검색
+                        const allElements = Array.from(document.querySelectorAll('div, span, p, label'));
+                        coordDisplay = allElements.find(el => 
+                            el.textContent.includes('미세 조정할 관절') || 
+                            el.textContent.includes('미세조정할 관절')
+                        );
                     }
 
-                    // 3. 인체 모델의 회전 상태를 추적하여 동기화되는 3D 좌표축 그리기
+                    if (coordDisplay && pt) {
+                        const xVal = pt.rawX !== undefined ? pt.rawX : (pt.x || 0);
+                        const yVal = pt.rawY !== undefined ? pt.rawY : (pt.y || 0);
+                        const zVal = pt.zOffset !== undefined ? pt.zOffset : (pt.z || 0);
+
+                        // 요청하신 (x : ..., y : ..., z : ...) 정밀 포맷 매핑
+                        coordDisplay.innerHTML = `
+                            <div style="font-size: 11px; color: #666; margin-bottom: 2px;">선택 부위: <span style="font-weight: bold; color: #000;">${currentPartName}</span></div>
+                            <div style="font-size: 13px; font-weight: bold; color: #222; letter-spacing: 0.5px;">
+                                (x : ${xVal.toFixed(1)}, y : ${yVal.toFixed(1)}, z : ${zVal.toFixed(1)})
+                            </div>
+                        `;
+                    }
+
+                    // 4. 모델의 회전 상태와 동기화되는 3D 좌표축 화살표 렌더링
                     ctx.save();
-                    const originX = 50;                  // 캔버스 내 좌표축 중심 X
-                    const originY = canvas.height - 50;  // 캔버스 내 좌표축 중심 Y
-                    const axisLen = 35;                  // 축 선의 길이
+                    const originX = 50;                  
+                    const originY = canvas.height - 50;  
+                    const axisLen = 35;                  
                     ctx.lineWidth = 2.5;
                     ctx.font = 'bold 11px sans-serif';
 
-                    // 기존 스크립트에 선언된 다양한 형태의 회전각 변수들을 안전하게 자동 스캔
-                    let rX = 0;
-                    let rY = 0;
+                    let rX = 0; let rY = 0;
                     if (typeof currentRotationX !== 'undefined') rX = currentRotationX;
                     else if (typeof angleX !== 'undefined') rX = angleX;
 
                     if (typeof currentRotationY !== 'undefined') rY = currentRotationY;
                     else if (typeof angleY !== 'undefined') rY = angleY;
-                    else if (typeof camRad !== 'undefined') rY = camRad; // 시점 슬라이더 연동 변수
+                    else if (typeof camRad !== 'undefined') rY = camRad; 
 
-                    const cosX = Math.cos(rX);
-                    const sinX = Math.sin(rX);
-                    const cosY = Math.cos(rY);
-                    const sinY = Math.sin(rY);
+                    const cosX = Math.cos(rX); const sinX = Math.sin(rX);
+                    const cosY = Math.cos(rY); const sinY = Math.sin(rY);
 
-                    // 모델과 동일한 회전 행렬을 공간 축 벡터에 대입하여 사영하는 함수
                     function drawRotatedAxis(vx, vy, vz, color, label) {
-                        // Y축 회전 (Yaw)
                         let x1 = vx * cosY - vz * sinY;
                         let z1 = vx * sinY + vz * cosY;
-
-                        // X축 회전 (Pitch)
                         let y2 = vy * cosX - z1 * sinX;
                         let z2 = vy * sinX + z1 * cosX;
 
-                        // 계산된 3D 위치를 좌하단 원점 기준으로 매핑
                         const targetX = originX + x1 * axisLen;
                         const targetY = originY + y2 * axisLen;
 
@@ -2608,25 +2619,21 @@
                         ctx.lineTo(targetX, targetY);
                         ctx.stroke();
 
-                        // 텍스트가 축 선과 겹치지 않게 여백 배치
                         ctx.fillText(label, targetX + (x1 >= 0 ? 5 : -12), targetY + (y2 >= 0 ? 10 : -4));
                     }
 
-                    // X축 (빨강: 우측), Y축 (초록: 상단 방향 보정), Z축 (파랑: 깊이 평면)
+                    // X(우측), Y(상단 보정), Z(깊이 평면) 회전 투영 실행
                     drawRotatedAxis(1, 0, 0, '#d9534f', 'X');
                     drawRotatedAxis(0, -1, 0, '#28a745', 'Y');
                     drawRotatedAxis(0, 0, 1, '#007BFF', 'Z');
 
-                    // 좌표축 중심 원점 마커
+                    // 원점 마커
                     ctx.fillStyle = '#333';
-                    ctx.beginPath();
-                    ctx.arc(originX, originY, 3, 0, 2 * Math.PI);
-                    ctx.fill();
+                    ctx.beginPath(); ctx.arc(originX, originY, 3, 0, 2 * Math.PI); ctx.fill();
                     ctx.restore();
 
                 } catch (err) {
-                    // 오류가 발생해도 기존 스켈레톤이나 모달 제어 흐름이 끊기지 않도록 방어
-                    console.warn("좌표계 시각화 연동 중 예외 처리 경고:", err);
+                    console.warn("좌표계 렌더링 예외 처리 방어:", err);
                 }
                 // ========================================================
             }
