@@ -465,7 +465,7 @@
                     <div style="font-weight:bold; color:#333; margin-bottom: 5px; font-size: 13px;">
                         🎯 선택된 부위 조정: <span id="selectedJointName" style="color:#007BFF;">없음</span>
                     </div>
-                  
+                 
                     <div
                         style="display:flex; align-items:center; gap:6px; margin-bottom:6px; background:#fff; border:1px solid #ccc; border-radius:5px; padding:5px 8px;">
                         <span style="font-size:11px; font-weight:bold; color:#555; min-width:50px;">이동 배율:</span>
@@ -499,8 +499,8 @@
                         <span id="fineTuneZVal"
                             style="font-size:12px; min-width:30px; text-align: right; font-weight:bold;">0</span>
                     </div>
-                    <div id="currentCoordDisplay" style="margin-top: 10px; padding: 8px; background: #fff; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; font-weight: bold; font-family: monospace; color: #333; text-align: center;">
-                        미세 조정할 신체 부위를 선택해주세요.
+                    <div id="3d-coord-debug-panel" style="margin-top: 12px; padding: 10px; background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; font-family: monospace; font-size: 13px; text-align: center; font-weight: bold;">
+                        <span style="color: #666;">미세 조정할 관절을 선택해 주세요.</span>
                     </div>
                 </div>
 
@@ -2517,83 +2517,86 @@
                 drawSkeletonLayers(rotatedPoints3D, ctx, "background");
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
 
+                // --- [추가] 1. 모델과 동기화되어 회전하는 3차원 좌표축(Axes) 렌더링 ---
                 ctx.save();
-                const originX = 40;
-                const originY = canvas.height - 40;
-                const axisLen = 35;
-                ctx.lineWidth = 2.5;
-                ctx.font = 'bold 13px sans-serif';
+                const originX = 50;                 // 캔버스 좌하단 원점 X
+                const originY = canvas.height - 50; // 캔버스 좌하단 원점 Y
+                const axisLength = 40;              // 축 크기 기본 스케일
 
-                // X축 (빨강 - 좌우 방향)
-                ctx.strokeStyle = '#d9534f'; ctx.fillStyle = '#d9534f';
-                ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX + axisLen, originY); ctx.stroke();
-                ctx.fillText('X', originX + axisLen + 8, originY + 4);
+                // 기존 3D 회전 로직에서 사용하는 cos/sin 값을 그대로 가져오거나 동일하게 계산합니다.
+                // (기존 코드에 정의된 회전각 변수명인 angleX, angleY 등을 매핑하십시오)
+                const cX = Math.cos(currentRotationX || 0);
+                const sX = Math.sin(currentRotationX || 0);
+                const cY = Math.cos(currentRotationY || 0);
+                const sY = Math.sin(currentRotationY || 0);
 
-                // Y축 (초록 - 상하 방향)
-                ctx.strokeStyle = '#28a745'; ctx.fillStyle = '#28a745';
-                ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX, originY - axisLen); ctx.stroke();
-                ctx.fillText('Y', originX - 5, originY - axisLen - 8);
+                // 3차원 기본 공간 축 벡터 정의
+                const axes = {
+                    X: { x: 1, y: 0, z: 0, color: '#d9534f' }, // 빨강
+                    Y: { x: 0, y: -1, z: 0, color: '#28a745' }, // 초록 (화면 좌표계 반전 보정)
+                    Z: { x: 0, y: 0, z: 1, color: '#007bff' }  // 파랑
+                };
 
-                // Z축 (파랑 - 깊이 방향 사선)
-                ctx.strokeStyle = '#007BFF'; ctx.fillStyle = '#007BFF';
-                ctx.beginPath(); ctx.moveTo(originX, originY); ctx.lineTo(originX - axisLen * 0.5, originY + axisLen * 0.5); ctx.stroke();
-                ctx.fillText('Z', originX - axisLen * 0.5 - 12, originY + axisLen * 0.5 + 12);
-                
-                // 원점 점 표시
-                ctx.fillStyle = '#333'; ctx.beginPath(); ctx.arc(originX, originY, 3, 0, 2 * Math.PI); ctx.fill();
+                // 각 축 벡터에 인체 모델과 동일한 회전 변환 적용
+                Object.keys(axes).forEach(key => {
+                    const axis = axes[key];
+                    
+                    // Y축 회전 (Yaw)
+                    let x1 = axis.x * cY - axis.z * sY;
+                    let z1 = axis.x * sY + axis.z * cY;
+                    
+                    // X축 회전 (Pitch)
+                    let y2 = axis.y * cX - z1 * sX;
+                    let z2 = axis.y * sX + z1 * cX;
+
+                    // 회전된 3D 벡터를 좌하단 2D 원점(originX, originY) 기준으로 사영
+                    const targetX = originX + x1 * axisLength;
+                    const targetY = originY + y2 * axisLength;
+
+                    // 축 그리기
+                    ctx.strokeStyle = axis.color;
+                    ctx.fillStyle = axis.color;
+                    ctx.lineWidth = 2.5;
+                    ctx.beginPath();
+                    ctx.moveTo(originX, originY);
+                    ctx.lineTo(targetX, targetY);
+                    ctx.stroke();
+
+                    // 축 명칭 텍스트 표시
+                    ctx.font = 'bold 12px sans-serif';
+                    ctx.fillText(key, targetX + (x1 * 5), targetY + (y2 * 5) + 4);
+                });
+
+                // 중심 원점 마커
+                ctx.fillStyle = '#333';
+                ctx.beginPath(); ctx.arc(originX, originY, 3, 0, 2 * Math.PI); ctx.fill();
                 ctx.restore();
 
-                // --- [신규 추가 2] 선택된 신체부위의 실시간 (x, y, z) 좌표값 패널 갱신 ---
-                const coordDisplay = document.getElementById('currentCoordDisplay');
-                if (coordDisplay) {
-                    if (selectedPointIndex3D !== -1 && kps[selectedPointIndex3D]) {
-                        const pt = kps[selectedPointIndex3D];
-                        const zVal = pt.zOffset || 0; // Z축 오프셋 값
-                        coordDisplay.innerHTML = `<span style="color:#d9534f">X: ${pt.x.toFixed(1)}</span> &nbsp;|&nbsp; <span style="color:#28a745">Y: ${pt.y.toFixed(1)}</span> &nbsp;|&nbsp; <span style="color:#007BFF">Z: ${zVal.toFixed(1)}</span>`;
+
+                // --- [추가] 2. 선택된 신체 부위의 보정 전후 물리적 3차원 좌표 실시간 표시 ---
+                const debugPanel = document.getElementById('3d-coord-debug-panel');
+                if (debugPanel) {
+                    // 현재 선택된 3D 포인트 인덱스 변수 확인 (예: selectedPointIndex3D)
+                    if (typeof selectedPointIndex3D !== 'undefined' && selectedPointIndex3D !== -1 && kps[selectedPointIndex3D]) {
+                        const targetPart = kps[selectedPointIndex3D];
+                        
+                        // 불균형 보정에 직결되는 순수 2D 값 기반 XY와 수동 조정된 Z축(zOffset) 값 추출
+                        const realX = targetPart.x;
+                        const realY = targetPart.y;
+                        const realZ = targetPart.zOffset !== undefined ? targetPart.zOffset : (targetPart.z || 0);
+
+                        debugPanel.innerHTML = `
+                            <span style="color: #495057;">[선정 부위 ID: ${selectedPointIndex3D}]</span> 
+                            <span style="color: #d9534f; margin-left: 8px;">X: ${realX.toFixed(1)}</span>
+                            <span style="color: #28a745; margin-left: 8px;">Y: ${realY.toFixed(1)}</span>
+                            <span style="color: #007bff; margin-left: 8px;">Z(보정): ${realZ.toFixed(1)}</span>
+                        `;
                     } else {
-                        coordDisplay.innerHTML = "미세 조정할 신체 부위를 선택해주세요.";
+                        debugPanel.innerHTML = `<span style="color: #868e96;">미세 조정할 관절을 선택하거나 슬라이더를 움직여주세요.</span>`;
                     }
                 }
             }
-
-            function drawAxisIndicator(ctx, canvas) {
-                const originX = 60;
-                const originY = canvas.height - 60;
-
-                ctx.save();
-                ctx.lineWidth = 2;
-                ctx.font = "12px Arial";
-
-                // X (빨강)
-                ctx.strokeStyle = "#ff4d4d";
-                ctx.beginPath();
-                ctx.moveTo(originX, originY);
-                ctx.lineTo(originX + 40, originY);
-                ctx.stroke();
-                ctx.fillStyle = "#ff4d4d";
-                ctx.fillText("X", originX + 45, originY + 5);
-
-                // Y (초록)
-                ctx.strokeStyle = "#00cc66";
-                ctx.beginPath();
-                ctx.moveTo(originX, originY);
-                ctx.lineTo(originX, originY - 40);
-                ctx.stroke();
-                ctx.fillStyle = "#00cc66";
-                ctx.fillText("Y", originX - 10, originY - 45);
-
-                // Z (파랑, 대각선)
-                ctx.strokeStyle = "#3399ff";
-                ctx.beginPath();
-                ctx.moveTo(originX, originY);
-                ctx.lineTo(originX - 30, originY + 30);
-                ctx.stroke();
-                ctx.fillStyle = "#3399ff";
-                ctx.fillText("Z", originX - 40, originY + 40);
-
-                ctx.restore();
-            }
-
+            
             function drawSkeletonLayers(points, ctx, layerType) {
                 // [수정됨] V자 선을 만들던 [0, 5], [0, 6] 제거
                 const connections = [
