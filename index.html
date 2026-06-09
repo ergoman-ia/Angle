@@ -435,6 +435,20 @@
                 <p style="font-size:12px; color:#666; margin-top:8px;">관절을 클릭하여 선택한 후 우측 슬라이더로 미세 조정하세요.</p>
             </div>
 
+            <div style="display:flex; align-items:center; gap:10px; background:#f0f4ff;
+            padding:10px 12px; border-radius:6px; margin-bottom:12px;
+            border:1px solid #c7d2fe;">
+                <label style="font-size:13px; font-weight:bold; color:#3730a3; white-space:nowrap;">
+                    👤 실제 신장 (cm)
+                </label>
+                <input type="number" id="refHeightCm" value="170" min="100" max="220" style="width:70px; padding:5px 8px; border:1px solid #a5b4fc;
+                  border-radius:4px; font-size:14px; font-weight:bold;
+                  color:#3730a3; text-align:center;" oninput="render3DModal()">
+                <span style="font-size:12px; color:#6366f1;">
+                    (미입력 시 기본값 170cm 적용)
+                </span>
+            </div>
+
             <div style="width: 380px; display: flex; flex-direction: column; min-height: 480px;">
 
                 <div
@@ -2545,16 +2559,26 @@
 
                 // 3D 모달 좌상단에 추정 신장 표시 (참고용)
                 if (estimatedStature) {
+                    // 입력된 실제 신장(cm)을 기준으로 px↔cm 변환 비율 산출
+                    const refHeightCm = parseFloat(document.getElementById('refHeightCm')?.value) || 170;
+                    const pxPerCm = estimatedStature / refHeightCm;
+
+                    // buildAnthroZ에도 cm 기반 실제 길이를 넘길 수 있도록 전역 저장 (선택사항)
+                    window._pxPerCm = pxPerCm;
+
                     ctx.save();
                     ctx.fillStyle = 'rgba(0,0,0,0.55)';
                     ctx.beginPath();
-                    ctx.roundRect(8, 8, 240, 28, 5);
+                    ctx.roundRect(8, 8, 260, 28, 5);
                     ctx.fill();
                     ctx.fillStyle = '#ffffff';
                     ctx.font = 'bold 12px Arial';
                     ctx.textAlign = 'left';
                     ctx.textBaseline = 'top';
-                    ctx.fillText(`📏 추정 신장: ${estimatedStature.toFixed(1)}px | 인체계측 보정 적용`, 14, 12);
+                    ctx.fillText(
+                        `📏 추정 신장: ${refHeightCm}cm  |  1cm = ${pxPerCm.toFixed(1)}px  |  인체계측 보정 적용`,
+                        14, 12
+                    );
                     ctx.textBaseline = 'alphabetic';
                     ctx.restore();
                 }
