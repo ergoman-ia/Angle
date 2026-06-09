@@ -837,78 +837,7 @@
                     trunkYaw: 0,
                     camYaw: 0     // 👇 신규 추가: 카메라 시점 비틀림 값 저장소
                 };
-                if (rawPose) {
-                    // ── 🌟 [완벽 보정] 측면 자세 오인식 방지 및 좌우 반전 강제 교정 필터 ──
-                    const kps = rawPose.keypoints;
-                    const nose = kps[0];
-                    const leftShoulder = kps[5];
-                    const rightShoulder = kps[6];
-
-                    // 코와 양 어깨 데이터가 유효할 때만 검증 시작
-                    if (nose && leftShoulder && rightShoulder) {
-                        // 1. 몸통 중심축 기준으로 코가 어느 쪽에 있는지로 시선(바라보는 방향) 판별
-                        const shoulderCenterX = (leftShoulder.x + rightShoulder.x) / 2;
-                        const isLookingLeft = nose.x < shoulderCenterX;
-                        const isLookingRight = nose.x > shoulderCenterX;
-
-                        // 2. AI가 판단한 좌측 관절들과 우측 관절들의 평균 신뢰도(Score) 계산
-                        const leftScore = (kps[5].score + kps[7].score + kps[11].score) / 3;
-                        const rightScore = (kps[6].score + kps[8].score + kps[12].score) / 3;
-
-                        // ⚠️ [안전장치] 정면 사진에서 미세한 비대칭 때문에 뒤집히는 것을 막기 위해,
-                        // 좌우 신뢰도 차이가 확실히 나는 '측면(Profile) 뷰'인 경우에만 필터를 작동시킵니다.
-                        const isProfileView = Math.abs(leftScore - rightScore) > 0.1;
-
-                        let needSwap = false;
-                        if (isProfileView) {
-                            // 모순 검증 A: 작업자가 왼쪽을 보는데(Left Profile), AI는 오른쪽 관절(Right)의 점수를 더 높게 준 경우 (좌우 뒤바뀜 오류)
-                            if (isLookingLeft && rightScore > leftScore) {
-                                needSwap = true;
-                            }
-                            // 모순 검증 B: 작업자가 오른쪽을 보는데(Right Profile), AI는 왼쪽 관절(Left)의 점수를 더 높게 준 경우 (좌우 뒤바뀜 오류)
-                            else if (isLookingRight && leftScore > rightScore) {
-                                needSwap = true;
-                            }
-                        }
-
-                        // AI의 방향성 오판이 확실히 감지되면 MoveNet의 17개 키포인트 중 대칭쌍들을 통째로 맞바꿉니다.
-                        if (needSwap) {
-                            const symmetricPairs = [
-                                [1, 2],   // 눈 (좌, 우)
-                                [3, 4],   // 귀 (좌, 우)
-                                [5, 6],   // 어깨 (좌, 우)
-                                [7, 8],   // 팔꿈치 (좌, 우)
-                                [9, 10],  // 손목 (좌, 우)
-                                [11, 12], // 골반 (좌, 우)
-                                [13, 14], // 무릎 (좌, 우)
-                                [15, 16]  // 발목 (좌, 우)
-                            ];
-
-                            symmetricPairs.forEach(pair => {
-                                const lIdx = pair[0];
-                                const rIdx = pair[1];
-
-                                // 좌표(x, y)와 점수(score)를 안전하게 교환 (데이터 구조 유지)
-                                const tempX = kps[lIdx].x;
-                                const tempY = kps[lIdx].y;
-                                const tempScore = kps[lIdx].score;
-
-                                kps[lIdx].x = kps[rIdx].x;
-                                kps[lIdx].y = kps[rIdx].y;
-                                kps[lIdx].score = kps[rIdx].score;
-
-                                kps[rIdx].x = tempX;
-                                kps[rIdx].y = tempY;
-                                kps[rIdx].score = tempScore;
-                            });
-                            console.log("🎯 [필터 작동] 측면 사진 오인식 감지: 뒤집힌 좌우 신체 데이터를 정상 위치로 강제 스왑했습니다.");
-                        }
-                    }
-                    // ───────────────────────────────────────────────────────────────────
-
-                    // 정제가 완료된 깨끗한 데이터를 가지고 기존의 자동 각도 계산 로직 수행
-                    autoCalculateAngles(data);
-                }
+                if (rawPose) autoCalculateAngles(data);
                 return data;
             }
 
@@ -2506,27 +2435,11 @@
                 const dz2H = (idealHipW * idealHipW) - (actualHipW * actualHipW);
                 const dzH = dz2H > 0 ? Math.min(Math.sqrt(dz2H), maxBone * 0.5) : 0;
 
-                // 1. 부호 변경을 위해 const를 let으로 변경합니다.
-                let zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
-                let zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
+                const zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                const zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
-                // 🌟 [추가 로직] X축 역전 방지 (어깨)
-                // 작업자의 오른쪽 어깨(rs)가 왼쪽 어깨(ls)보다 화면상 우측에 있다면(x값이 크다면),
-                // 이는 뒤를 돌았거나 측면으로 심하게 틀어진 상태이므로 Z축 부호를 반전시켜 꼬임을 막습니다.
-                if (rs.x > ls.x) {
-                    zRightShoulder = -zRightShoulder;
-                    zLeftShoulder = -zLeftShoulder;
-                }
-
-                // 2. 골반도 동일하게 let으로 변경합니다.
-                let zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
-                let zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
-
-                // 🌟 [추가 로직] X축 역전 방지 (골반)
-                if (rh.x > lh.x) {
-                    zRightHip = -zRightHip;
-                    zLeftHip = -zLeftHip;
-                }
+                const zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                const zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
 
                 // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
                 const rawPoints = kps.map((pt, idx) => {
