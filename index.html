@@ -437,7 +437,6 @@
 
             <div style="width: 380px; display: flex; flex-direction: column; min-height: 480px;">
                 <p></p>
-
                 <div
                     style="display: flex; flex-direction: column; gap: 8px; background: #f8f9fa; padding: 12px; border-radius: 6px;">
                     <div style="font-weight:bold; font-size:13px; margin-bottom: 5px;">🔄 전체/몸통/목 비틀림</div>
@@ -795,6 +794,105 @@
                 return z;
             }
 
+            // ============================================================
+            // 🦴 인체계측 기반 3D 세계 좌표 재구성
+            // 핵심: 가려지거나 단축된 관절의 X,Y 위치를 실제 분절 길이로 교정
+            // ============================================================
+            function buildCorrectedWorld3D(kps, isRightCloser, stature) {
+                // 초기값: 원본 2D 좌표 복사
+                const world = kps.map(kp => ({
+                    x: kp.x, y: kp.y, z: 0, score: kp.score
+                }));
+
+                if (!stature) return world;
+
+                const T = {
+                    ua: stature * ANTHRO_RATIOS.upperArm,   // 상완
+                    fa: stature * ANTHRO_RATIOS.forearm,    // 전완
+                    th: stature * ANTHRO_RATIOS.thigh,      // 대퇴
+                    sh: stature * ANTHRO_RATIOS.shank,      // 하퇴
+                    sw: stature * ANTHRO_RATIOS.shoulderWidth,
+                    hw: stature * ANTHRO_RATIOS.hipWidth,
+                };
+                const D = -1;
+
+                // ── 어깨·골반 Z (너비 단축 기반) ───────────────────────────
+                const dzS = foreshortenZ(kps[5], kps[6], T.sw);
+                const dzH = foreshortenZ(kps[11], kps[12], T.hw);
+                world[6].z = isRightCloser ? dzS / 2 * D : -dzS / 2 * D;
+                world[5].z = isRightCloser ? -dzS / 2 * D : dzS / 2 * D;
+                world[12].z = isRightCloser ? dzH / 2 * D : -dzH / 2 * D;
+                world[11].z = isRightCloser ? -dzH / 2 * D : dzH / 2 * D;
+
+                // ── 두경부 Z ───────────────────────────────────────────────
+                world[0].z = 35 * D;
+                world[3].z = world[4].z = 10 * D;
+                world[1].z = world[2].z = 8 * D;
+
+                // ── 핵심: 운동학적 체인으로 원위 관절 위치 재구성 ──────────
+                // OCCLUDED_RATIO 이하로 짧게 감지된 분절 = 가려진 것으로 판단
+                const OCCLUDED_RATIO = 0.62;
+
+                const placeDistal = (proxIdx, distIdx, trueLen, fwdDir) => {
+                    const pw = world[proxIdx];          // proximal world 좌표
+                    const pk = kps[proxIdx];            // proximal 원본 2D
+                    const dk = kps[distIdx];            // distal 원본 2D
+
+                    if (pw.score < 0.1) return;
+
+                    const dx2d = dk.x - pk.x;
+                    const dy2d = dk.y - pk.y;
+                    const proj2d = Math.hypot(dx2d, dy2d);
+
+                    if (proj2d < trueLen * OCCLUDED_RATIO) {
+                        // ✅ 가려진 관절 → 관측된 방향으로 실제 분절 길이만큼 연장
+                        let ux, uy;
+                        if (proj2d > 3) {
+                            // 감지된 방향을 단위벡터로 사용
+                            ux = dx2d / proj2d;
+                            uy = dy2d / proj2d;
+                        } else {
+                            // 감지 불가 → 기본 방향 (다리: 수직 아래, 팔: 비스듬히)
+                            if (distIdx >= 13) {           // 무릎, 발목
+                                ux = 0; uy = 1;
+                            } else if (distIdx >= 7) {     // 팔꿈치, 손목
+                                ux = fwdDir * 0.4; uy = 0.5;
+                            } else {
+                                ux = 0; uy = 0.7;
+                            }
+                            const mag = Math.hypot(ux, uy);
+                            ux /= mag; uy /= mag;
+                        }
+
+                        // 재구성된 위치: proximal + 실제 분절 길이 × 방향
+                        world[distIdx].x = pw.x + ux * trueLen;
+                        world[distIdx].y = pw.y + uy * trueLen;
+                        world[distIdx].z = pw.z; // Z는 proximal과 동일 (앞뒤 안 돌아간 것으로 가정)
+                        if (world[distIdx].score < 0.15) world[distIdx].score = 0.15;
+
+                    } else {
+                        // ✅ 정상 감지된 관절 → 기존 2D 위치 유지 + Z만 foreshortening으로 계산
+                        const zDiff = Math.sqrt(Math.max(0, trueLen * trueLen - proj2d * proj2d));
+                        world[distIdx].x = pw.x + dx2d;
+                        world[distIdx].y = pw.y + dy2d;
+                        world[distIdx].z = pw.z + zDiff * D * fwdDir;
+                    }
+                };
+
+                const dir = isRightCloser ? 1 : -1;
+
+                // 운동학적 체인 적용 (근위 → 원위 순서 엄수)
+                placeDistal(6, 8, T.ua, dir);   // 우측 상완
+                placeDistal(8, 10, T.fa, dir);   // 우측 전완
+                placeDistal(5, 7, T.ua, -dir);   // 좌측 상완
+                placeDistal(7, 9, T.fa, -dir);   // 좌측 전완
+                placeDistal(12, 14, T.th, dir);   // 우측 대퇴
+                placeDistal(14, 16, T.sh, dir);   // 우측 하퇴
+                placeDistal(11, 13, T.th, -dir);   // 좌측 대퇴
+                placeDistal(13, 15, T.sh, -dir);   // 좌측 하퇴
+
+                return world;
+            }
 
 
             customFileBtn.addEventListener('click', () => imageLoader.click());
@@ -2570,19 +2668,23 @@
                     ctx.restore();
                 }
 
-                // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
+                // ── 1단계: 인체계측 교정된 3D 세계 좌표로 rawPoints 구성 ──
+                // buildCorrectedWorld3D가 가려진 관절의 X,Y 위치까지 보정
+                const correctedWorld = buildCorrectedWorld3D(kps, isRightCloserBaseline, estimatedStature);
+
                 const rawPoints = kps.map((pt, idx) => {
                     const base = baselineKps3D ? baselineKps3D[idx] : pt;
-                    // 드래그로 변경된 양 = 현재 kps - baseline
                     const dragDx = pt.x - (baselineKps3D ? baselineKps3D[idx].x : pt.x);
                     const dragDy = pt.y - (baselineKps3D ? baselineKps3D[idx].y : pt.y);
-                    let x = base.x + dragDx; // baseline + drag offset
-                    let y = base.y + dragDy;
-                    // 인체계측 비율로 역산된 Z값 사용 (anthroZ는 두경부 포함 전 관절 포함)
-                    let z = anthroZ[idx] || 0;
 
-                    // 사용자가 슬라이더/드래그로 수동 조정한 zOffset은 위에 누적
+                    // ✅ 핵심 변경: kps.x/y 대신 correctedWorld 좌표 사용
+                    //    (가려진 관절은 인체 분절 비율로 보정된 위치가 반영됨)
+                    let x = correctedWorld[idx].x + dragDx;
+                    let y = correctedWorld[idx].y + dragDy;
+                    let z = correctedWorld[idx].z;          // ← Z도 correctedWorld에서 가져옴
                     if (pt.zOffset !== undefined) z += pt.zOffset;
+
+                    // 이하 기존 회전 로직 동일 (neckRad, trunkRad, camRad) ...
 
                     let finalX = x, finalZ = z;
 
