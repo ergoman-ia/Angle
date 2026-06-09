@@ -844,29 +844,6 @@
                     const leftShoulder = kps[5];
                     const rightShoulder = kps[6];
 
-                    if (kps[0] && kps[5] && kps[6]) {
-                        const noseX = kps[0].x;
-                        const shoulderCenterX = (kps[5].x + kps[6].x) / 2;
-
-                        // 1. 코가 어깨 중심보다 왼쪽에 있으면 '좌측면'을 보고 있는 상태
-                        const isFacingLeft = noseX < shoulderCenterX;
-
-                        // 2. 좌측면을 볼 때, 카메라와 가까운 쪽(화면상 더 왼쪽에 있는 관절)은 해부학적으로 반드시 '오른쪽(Right)'이어야 함.
-                        // 만약 왼쪽 어깨(5)가 오른쪽 어깨(6)보다 더 왼쪽에 있다면(x값이 작다면), AI가 좌우를 반대로 인식한 것이므로 강제 Swap.
-                        if (isFacingLeft && (kps[5].x < kps[6].x)) {
-                            console.log("비틀림 오류 감지: 좌우 신체 데이터를 강제 교정합니다.");
-                            const symmetricPairs = [[1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12], [13, 14], [15, 16]];
-
-                            symmetricPairs.forEach(pair => {
-                                const l = pair[0], r = pair[1];
-                                // x, y, score 맞바꾸기
-                                const temp = { x: kps[l].x, y: kps[l].y, score: kps[l].score };
-                                kps[l].x = kps[r].x; kps[l].y = kps[r].y; kps[l].score = kps[r].score;
-                                kps[r].x = temp.x; kps[r].y = temp.y; kps[r].score = temp.score;
-                            });
-                        }
-                    }
-
                     // 코와 양 어깨 데이터가 유효할 때만 검증 시작
                     if (nose && leftShoulder && rightShoulder) {
                         // 1. 몸통 중심축 기준으로 코가 어느 쪽에 있는지로 시선(바라보는 방향) 판별
@@ -2530,23 +2507,25 @@
                 const dzH = dz2H > 0 ? Math.min(Math.sqrt(dz2H), maxBone * 0.5) : 0;
 
                 // 1. 부호 변경을 위해 const를 let으로 변경합니다.
-                let zLeftShoulder = isRightCloserBaseline ? dzS : -dzS;
-                let zRightShoulder = isRightCloserBaseline ? -dzS : dzS;
+                let zRightShoulder = isRightCloserBaseline ? (dzS / 2) * Z_DIR : -(dzS / 2) * Z_DIR;
+                let zLeftShoulder = isRightCloserBaseline ? -(dzS / 2) * Z_DIR : (dzS / 2) * Z_DIR;
 
-                let zLeftHip = isRightCloserBaseline ? dzH : -dzH;
-                let zRightHip = isRightCloserBaseline ? -dzH : dzH;
-
-                // 2. 🌟 핵심: 3D 변환 중 뒤집힘(Gimbal Lock) 방지
-                // 오른쪽 어깨(6)의 X좌표가 왼쪽 어깨(5)보다 작아졌다면(즉, 몸통이 꼬여서 화면상 교차되었다면)
-                // 3D 공간이 꼬이는 것을 막기 위해 Z축 깊이 부호를 강제로 한 번 더 반전시킵니다.
-                if (kps[6].x < kps[5].x) {
-                    zLeftShoulder = -zLeftShoulder;
+                // 🌟 [추가 로직] X축 역전 방지 (어깨)
+                // 작업자의 오른쪽 어깨(rs)가 왼쪽 어깨(ls)보다 화면상 우측에 있다면(x값이 크다면),
+                // 이는 뒤를 돌았거나 측면으로 심하게 틀어진 상태이므로 Z축 부호를 반전시켜 꼬임을 막습니다.
+                if (rs.x > ls.x) {
                     zRightShoulder = -zRightShoulder;
+                    zLeftShoulder = -zLeftShoulder;
                 }
 
-                if (kps[12].x < kps[11].x) {
-                    zLeftHip = -zLeftHip;
+                // 2. 골반도 동일하게 let으로 변경합니다.
+                let zRightHip = isRightCloserBaseline ? (dzH / 2) * Z_DIR : -(dzH / 2) * Z_DIR;
+                let zLeftHip = isRightCloserBaseline ? -(dzH / 2) * Z_DIR : (dzH / 2) * Z_DIR;
+
+                // 🌟 [추가 로직] X축 역전 방지 (골반)
+                if (rh.x > lh.x) {
                     zRightHip = -zRightHip;
+                    zLeftHip = -zLeftHip;
                 }
 
                 // ── 1단계: 회전된 raw 좌표만 먼저 수집 ──
@@ -3046,8 +3025,7 @@
                         updateKp(11, { x: kps[11].x + dx, y: kps[11].y + dy });
                         updateKp(12, { x: kps[12].x + dx, y: kps[12].y + dy });
                     } else {
-                        const visibleHipIdx = (kps[12].score > kps[11].score) ? 12 : 11;
-                        updateKp(visibleHipIdx, points[1]);
+                        updateKp(isFacingRight ? 12 : 11, points[1]);
                     }
 
                     if (activeData.isBilateral.arms) {
@@ -3056,8 +3034,7 @@
                         updateKp(5, { x: kps[5].x + dx, y: kps[5].y + dy });
                         updateKp(6, { x: kps[6].x + dx, y: kps[6].y + dy });
                     } else {
-                        const visibleShoulderIdx = (kps[6].score > kps[5].score) ? 6 : 5;
-                        updateKp(visibleShoulderIdx, points[2]);
+                        updateKp(isFacingRight ? 6 : 5, points[2]);
                     }
                 } else {
                     const map = {
