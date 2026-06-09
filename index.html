@@ -2518,124 +2518,91 @@
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
 
                 // ========================================================
-                // [안전 통합] 실시간 XYZ 좌표 피드백 및 회전 연동 3D 좌표축
+                // 1. (x : ..., y : ..., z : ...) 실시간 좌표값 출력
                 // ========================================================
-                try {
-                    // 1. 활성화된 신체 부위 인덱스 판별 (기본값 6: 오른쪽 어깨)
-                    let activeIdx = 6; 
-                    if (typeof selectedPointIndex3D !== 'undefined' && selectedPointIndex3D !== -1) {
-                        activeIdx = selectedPointIndex3D;
-                    } else if (typeof selectedJointIndex !== 'undefined' && selectedJointIndex !== -1) {
-                        activeIdx = selectedJointIndex;
-                    } else if (typeof currentJointIndex !== 'undefined' && currentJointIndex !== -1) {
-                        activeIdx = currentJointIndex;
-                    }
+                const coordDisplay = document.getElementById('currentCoordDisplay');
+                if (coordDisplay) {
+                    // 모달 오픈 시 선택값이 없으면 '오른쪽 어깨(6)'를 기본값으로 고정
+                    const targetIdx = selectedPointIndex3D !== -1 ? selectedPointIndex3D : 6;
+                    
+                    const pt = kps[targetIdx];
+                    if (pt) {
+                        const bodyParts = {
+                            0: '코(Nose)', 1: '왼쪽 눈', 2: '오른쪽 눈', 3: '왼쪽 귀', 4: '오른쪽 귀',
+                            5: '왼쪽 어깨', 6: '오른쪽 어깨', 7: '왼쪽 팔꿈치', 8: '오른쪽 팔꿈치',
+                            9: '왼쪽 손목', 10: '오른쪽 손목', 11: '왼쪽 골반', 12: '오른쪽 골반',
+                            13: '왼쪽 무릎', 14: '오른쪽 무릎', 15: '왼쪽 발목', 16: '오른쪽 발목'
+                        };
+                        const partName = bodyParts[targetIdx] || `관절 ${targetIdx}`;
+                        
+                        const dispX = pt.rawX !== undefined ? pt.rawX : pt.x;
+                        const dispY = pt.rawY !== undefined ? pt.rawY : pt.y;
+                        const dispZ = pt.zOffset !== undefined ? pt.zOffset : (pt.z || 0);
 
-                    // Tab 키 이동 또는 포커스된 엘리먼트가 있을 경우 해당 인덱스 자동 추적
-                    const activeEl = document.activeElement;
-                    if (activeEl) {
-                        const dataIdx = activeEl.getAttribute('data-index') || activeEl.getAttribute('data-idx');
-                        const idNum = activeEl.id ? activeEl.id.match(/\d+/) : null;
-                        if (dataIdx && !isNaN(parseInt(dataIdx))) {
-                            activeIdx = parseInt(dataIdx);
-                        } else if (idNum && !isNaN(parseInt(idNum[0]))) {
-                            const parsed = parseInt(idNum[0]);
-                            if (parsed >= 0 && parsed <= 16) activeIdx = parsed;
-                        }
-                    }
-
-                    // 분석용 신체 부위 한글 매칭
-                    const partNames = {
-                        0: "코 (Nose)", 1: "왼쪽 눈", 2: "오른쪽 눈", 3: "왼쪽 귀", 4: "오른쪽 귀",
-                        5: "왼쪽 어깨", 6: "오른쪽 어깨", 7: "왼쪽 팔꿈치", 8: "오른쪽 팔꿈치",
-                        9: "왼쪽 손목", 10: "오른쪽 손목", 11: "왼쪽 골반", 12: "오른쪽 골반",
-                        13: "왼쪽 무릎", 14: "오른쪽 무릎", 15: "왼쪽 발목", 16: "오른쪽 발목"
-                    };
-                    const currentPartName = partNames[activeIdx] || `관절 ${activeIdx}`;
-
-                    // 2. 좌표 데이터를 안전하게 추출 (kps 원본 데이터 우선 참조)
-                    let pt = null;
-                    if (typeof kps !== 'undefined' && kps[activeIdx]) pt = kps[activeIdx];
-                    else if (typeof rotatedPoints3D !== 'undefined' && rotatedPoints3D[activeIdx]) pt = rotatedPoints3D[activeIdx];
-                    else if (window.kps && window.kps[activeIdx]) pt = window.kps[activeIdx];
-
-                    // 3. 안내 문구 컨테이너 탐색 및 명시된 포맷으로 XYZ 수치 출력
-                    let coordDisplay = document.getElementById('currentCoordDisplay') || document.getElementById('3d-coord-debug-panel');
-                    if (!coordDisplay) {
-                        // ID가 명확하지 않을 경우 "미세 조정할 관절" 문구가 포함된 엘리먼트를 동적 검색
-                        const allElements = Array.from(document.querySelectorAll('div, span, p, label'));
-                        coordDisplay = allElements.find(el => 
-                            el.textContent.includes('미세 조정할 관절') || 
-                            el.textContent.includes('미세조정할 관절')
-                        );
-                    }
-
-                    if (coordDisplay && pt) {
-                        const xVal = pt.rawX !== undefined ? pt.rawX : (pt.x || 0);
-                        const yVal = pt.rawY !== undefined ? pt.rawY : (pt.y || 0);
-                        const zVal = pt.zOffset !== undefined ? pt.zOffset : (pt.z || 0);
-
-                        // 요청하신 (x : ..., y : ..., z : ...) 정밀 포맷 매핑
+                        // 요청하신 (x : ..., y : ..., z : ...) 포맷 적용
                         coordDisplay.innerHTML = `
-                            <div style="font-size: 11px; color: #666; margin-bottom: 2px;">선택 부위: <span style="font-weight: bold; color: #000;">${currentPartName}</span></div>
-                            <div style="font-size: 13px; font-weight: bold; color: #222; letter-spacing: 0.5px;">
-                                (x : ${xVal.toFixed(1)}, y : ${yVal.toFixed(1)}, z : ${zVal.toFixed(1)})
+                            <div style="font-size: 12px; color: #555; margin-bottom: 5px;">현재 선택된 부위: <span style="font-weight:bold; color:#007BFF">${partName}</span></div>
+                            <div style="font-size: 14px; font-weight: bold; color: #333;">
+                                (x : ${dispX.toFixed(1)}, y : ${dispY.toFixed(1)}, z : ${dispZ.toFixed(1)})
                             </div>
                         `;
                     }
-
-                    // 4. 모델의 회전 상태와 동기화되는 3D 좌표축 화살표 렌더링
-                    ctx.save();
-                    const originX = 50;                  
-                    const originY = canvas.height - 50;  
-                    const axisLen = 35;                  
-                    ctx.lineWidth = 2.5;
-                    ctx.font = 'bold 11px sans-serif';
-
-                    let rX = 0; let rY = 0;
-                    if (typeof currentRotationX !== 'undefined') rX = currentRotationX;
-                    else if (typeof angleX !== 'undefined') rX = angleX;
-
-                    if (typeof currentRotationY !== 'undefined') rY = currentRotationY;
-                    else if (typeof angleY !== 'undefined') rY = angleY;
-                    else if (typeof camRad !== 'undefined') rY = camRad; 
-
-                    const cosX = Math.cos(rX); const sinX = Math.sin(rX);
-                    const cosY = Math.cos(rY); const sinY = Math.sin(rY);
-
-                    function drawRotatedAxis(vx, vy, vz, color, label) {
-                        let x1 = vx * cosY - vz * sinY;
-                        let z1 = vx * sinY + vz * cosY;
-                        let y2 = vy * cosX - z1 * sinX;
-                        let z2 = vy * sinX + z1 * cosX;
-
-                        const targetX = originX + x1 * axisLen;
-                        const targetY = originY + y2 * axisLen;
-
-                        ctx.strokeStyle = color;
-                        ctx.fillStyle = color;
-                        ctx.beginPath();
-                        ctx.moveTo(originX, originY);
-                        ctx.lineTo(targetX, targetY);
-                        ctx.stroke();
-
-                        ctx.fillText(label, targetX + (x1 >= 0 ? 5 : -12), targetY + (y2 >= 0 ? 10 : -4));
-                    }
-
-                    // X(우측), Y(상단 보정), Z(깊이 평면) 회전 투영 실행
-                    drawRotatedAxis(1, 0, 0, '#d9534f', 'X');
-                    drawRotatedAxis(0, -1, 0, '#28a745', 'Y');
-                    drawRotatedAxis(0, 0, 1, '#007BFF', 'Z');
-
-                    // 원점 마커
-                    ctx.fillStyle = '#333';
-                    ctx.beginPath(); ctx.arc(originX, originY, 3, 0, 2 * Math.PI); ctx.fill();
-                    ctx.restore();
-
-                } catch (err) {
-                    console.warn("좌표계 렌더링 예외 처리 방어:", err);
                 }
+
                 // ========================================================
+                // 2. CAD/3D 툴 표준 규격의 회전 좌표계 (Gizmo) 렌더링
+                // ========================================================
+                ctx.save();
+                const originX = 50;
+                const originY = canvas.height - 50;
+                const axisLen = 35;
+                ctx.lineWidth = 2.5;
+                ctx.font = 'bold 12px sans-serif';
+
+                // 3D 투영 함수 (위에서 약간 내려다보는 표준 원근감 투영)
+                const pitch = 0.4; // 약 23도 내려다보는 시점
+                function project3D(x, y, z) {
+                    // camRad(모델 시점 회전각)를 기준으로 Y축 회전 적용
+                    const rx = x * Math.cos(camRad) + z * Math.sin(camRad);
+                    const rz = -x * Math.sin(camRad) + z * Math.cos(camRad);
+                    const ry = y;
+
+                    // 2D 캔버스 X/Y로 변환 (Y축은 위로 향하도록 음수 처리, Z축 깊이감 부여)
+                    const screenX = rx;
+                    const screenY = -ry * Math.cos(pitch) + rz * Math.sin(pitch);
+                    return { u: screenX, v: screenY };
+                }
+
+                // 축 그리기 헬퍼 함수
+                function drawAxis(x, y, z, color, label) {
+                    const proj = project3D(x, y, z);
+                    const targetX = originX + proj.u;
+                    const targetY = originY + proj.v;
+
+                    ctx.strokeStyle = color;
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.moveTo(originX, originY);
+                    ctx.lineTo(targetX, targetY);
+                    ctx.stroke();
+
+                    // 라벨 위치 보정 (축 선과 겹치지 않도록)
+                    const padX = proj.u > 0 ? 5 : -12;
+                    const padY = proj.v > 0 ? 12 : -5;
+                    ctx.fillText(label, targetX + padX, targetY + padY);
+                }
+
+                // X (가로), Y (세로 높이), Z (앞뒤 깊이)
+                drawAxis(axisLen, 0, 0, '#d9534f', 'X'); // 빨강
+                drawAxis(0, axisLen, 0, '#28a745', 'Y'); // 초록
+                drawAxis(0, 0, axisLen, '#007BFF', 'Z'); // 파랑
+
+                // 중심 원점
+                ctx.fillStyle = '#333';
+                ctx.beginPath();
+                ctx.arc(originX, originY, 3, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.restore();
             }
             
             function drawSkeletonLayers(points, ctx, layerType) {
