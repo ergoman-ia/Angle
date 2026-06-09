@@ -2517,10 +2517,7 @@
                 drawSkeletonLayers(rotatedPoints3D, ctx, "background");
                 drawSkeletonLayers(rotatedPoints3D, ctx, "foreground");
 
-                // ========================================================
-                // 1. (x : ..., y : ..., z : ...) 실시간 좌표값 출력
-                // ========================================================
-                const coordDisplay = document.getElementById('currentCoordDisplay');
+                const coordDisplay = document.getElementById('3d-coord-debug-panel'); 
                 if (coordDisplay) {
                     // 모달 오픈 시 선택값이 없으면 '오른쪽 어깨(6)'를 기본값으로 고정
                     const targetIdx = selectedPointIndex3D !== -1 ? selectedPointIndex3D : 6;
@@ -2559,21 +2556,19 @@
                 ctx.lineWidth = 2.5;
                 ctx.font = 'bold 12px sans-serif';
 
-                // 3D 투영 함수 (위에서 약간 내려다보는 표준 원근감 투영)
-                const pitch = 0.4; // 약 23도 내려다보는 시점
-                function project3D(x, y, z) {
-                    // camRad(모델 시점 회전각)를 기준으로 Y축 회전 적용
-                    const rx = x * Math.cos(camRad) + z * Math.sin(camRad);
-                    const rz = -x * Math.sin(camRad) + z * Math.cos(camRad);
-                    const ry = y;
+                // ✅ 3D 투영 함수: 블렌더 등에서 익숙한 표준 등각투영(Isometric) 스타일로 변경
+                function project3D(vx, vy, vz) {
+                    // 모델 시점(camRad)에 연동되는 회전
+                    const rx = vx * Math.cos(camRad) + vz * Math.sin(camRad);
+                    const ry = vy;
+                    const rz = -vx * Math.sin(camRad) + vz * Math.cos(camRad);
 
-                    // 2D 캔버스 X/Y로 변환 (Y축은 위로 향하도록 음수 처리, Z축 깊이감 부여)
-                    const screenX = rx;
-                    const screenY = -ry * Math.cos(pitch) + rz * Math.sin(pitch);
+                    // X는 우측, Y는 상단(음수), Z는 좌하단(사선)으로 향하도록 직관적 투영
+                    const screenX = rx - rz * 0.5;
+                    const screenY = -ry + rz * 0.5;
                     return { u: screenX, v: screenY };
                 }
 
-                // 축 그리기 헬퍼 함수
                 function drawAxis(x, y, z, color, label) {
                     const proj = project3D(x, y, z);
                     const targetX = originX + proj.u;
@@ -2586,16 +2581,16 @@
                     ctx.lineTo(targetX, targetY);
                     ctx.stroke();
 
-                    // 라벨 위치 보정 (축 선과 겹치지 않도록)
-                    const padX = proj.u > 0 ? 5 : -12;
+                    // 텍스트 위치 겹치지 않게 보정
+                    const padX = proj.u > 0 ? 8 : -12;
                     const padY = proj.v > 0 ? 12 : -5;
                     ctx.fillText(label, targetX + padX, targetY + padY);
                 }
 
-                // X (가로), Y (세로 높이), Z (앞뒤 깊이)
-                drawAxis(axisLen, 0, 0, '#d9534f', 'X'); // 빨강
-                drawAxis(0, axisLen, 0, '#28a745', 'Y'); // 초록
-                drawAxis(0, 0, axisLen, '#007BFF', 'Z'); // 파랑
+                // 축 그리기: X (빨강, 가로), Y (초록, 높이), Z (파랑, 깊이)
+                drawAxis(axisLen, 0, 0, '#d9534f', 'X'); 
+                drawAxis(0, axisLen, 0, '#28a745', 'Y'); 
+                drawAxis(0, 0, axisLen, '#007BFF', 'Z'); 
 
                 // 중심 원점
                 ctx.fillStyle = '#333';
