@@ -602,9 +602,7 @@
             <button id="btn3DModal" style="width:100%;padding:10px 0;background:#6f42c1;color:#fff;border:none;
                        border-radius:5px;font-size:15px;font-weight:bold;cursor:pointer;
                        margin-bottom:10px;transition:opacity 0.2s;" onmouseover="this.style.opacity=0.85"
-                onmouseout="this.style.opacity=1">
-                🧍 3D 자세 보정
-            </button>
+                onmouseout="this.style.opacity=1">🧍 3D 자세 보정 </button>
             <hr style="border: 0; border-top: 1px solid #ddd; margin: 15px 0;">
             <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px;">
                 <input type="text" id="siteName" placeholder="현장명 입력 (예: A구역)"
@@ -2012,7 +2010,7 @@
                     statusMsg.style.color = "#007BFF";
 
                     const originalHeight = canvas.height;
-                    const extraHeight = 220;
+                    const extraHeight = 400;
                     canvas.height = originalHeight + extraHeight;
                     drawAll(true);
                     const rawExportDataUrl = canvas.toDataURL('image/png');
@@ -2204,6 +2202,37 @@
                 } else {
                     window._3Dpending = pd;
                 }
+                setTimeout(() => {
+                    const modal3DEl = document.getElementById('modal3D');
+                    const threeCanvas = document.getElementById('canvas3d'); 
+                    const container2D = document.getElementById('modal3D2DContainer');
+                    const canvas2D = document.getElementById('modal3D2DCanvas');
+                    
+                    if (threeCanvas && container2D && canvas2D) {
+                        // 1. 현재 렌더링된 3D 캔버스의 가로/세로 크기 측정
+                        const w3d = threeCanvas.clientWidth || 440;
+                        const h3d = threeCanvas.clientHeight || 480;
+                        
+                        // 2. 3D 크기의 80%로 타겟 크기 연산
+                        const targetW = w3d * 0.8;
+                        const targetH = h3d * 0.8;
+                        
+                        // 3. 좌측 2D 컨테이너 박스 크기 적용
+                        container2D.style.width = targetW + 'px';
+                        container2D.style.height = targetH + 'px';
+                        
+                        // 4. 메인 화면의 분석 결과 캔버스 내용을 모달 안 2D 캔버스에 복사
+                        const srcCanvas = document.getElementById('canvas');
+                        if (srcCanvas) {
+                            canvas2D.width = srcCanvas.width;
+                            canvas2D.height = srcCanvas.height;
+                            
+                            const ctx2D = canvas2D.getContext('2d');
+                            ctx2D.clearRect(0, 0, canvas2D.width, canvas2D.height);
+                            ctx2D.drawImage(srcCanvas, 0, 0); 
+                        }
+                    }
+                }, 60);
             });
 
             document.addEventListener('DOMContentLoaded', function () {
@@ -2324,6 +2353,9 @@
                         좌클릭:회전 | 휠:줌 | 우클릭:이동 | 더블클릭:초기화</span>
                 </div>
                 <div class="modal3d-inner">
+                    <div id="modal3D2DContainer" style="box-shadow: 0 0 8px rgba(0,0,0,0.2); background: #222; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: 6px; flex-shrink: 0;">
+                        <canvas id="modal3D2DCanvas" style="max-width: 100%; max-height: 100%; object-fit: contain;"></canvas>
+                    </div>
                     <canvas id="canvas3d" width="440" height="480"></canvas>
                     <div class="ctrl3d">
                         <div class="tbox3">
