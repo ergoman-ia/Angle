@@ -1318,7 +1318,7 @@
             saveBtn.addEventListener('click', function () {
                 // 1. 임시로 캔버스의 높이를 아래쪽으로 늘려 결과표 공간 확보 (800x600 -> 800x820)
                 const originalHeight = canvas.height;
-                const extraHeight = 220;
+                const extraHeight = 400;
                 canvas.height = originalHeight + extraHeight;
 
                 // 2. 전체 추출 모드로 다시 그리기 실행 (하단 결과 보고표 포함)
@@ -1774,6 +1774,55 @@
                     // 테이블 전체 외곽선 마감 치기
                     ctx.strokeStyle = '#9CA3AF';
                     ctx.strokeRect(tableX, boxY, 240, rowHeight * 8);
+
+                    const hasAuto3D = person.twistDeg !== undefined || person.shTiltDeg !== undefined || person.hipTiltDeg !== undefined;
+                    const hasCustom3D = person.customRots !== undefined;
+
+                    if (hasAuto3D || hasCustom3D) {
+                        let box3DY = boxY + (rowHeight * 8) + 8; // 기존 표 바로 아래 위치
+
+                        // 안에 들어갈 텍스트 배열을 동적으로 생성
+                        let lines3D = [];
+
+                        if (hasAuto3D) {
+                            lines3D.push(`[자동] 비틀림:${person.twistDeg ?? 0}° | 어깨:${person.shTiltDeg ?? 0}°`);
+                            lines3D.push(`[자동] 골반 기울기: ${person.hipTiltDeg ?? 0}°`);
+                        }
+
+                        // 수동 조정한 부위가 있다면 배열에 추가
+                        if (hasCustom3D) {
+                            const parts = [
+                                ['torsoGrp', '몸통'], ['nekPiv', '목'],
+                                ['shPivR', '윗팔(우)'], ['shPivL', '윗팔(좌)'],
+                                ['hipR', '다리(우)'], ['hipL', '다리(좌)']
+                            ];
+                            parts.forEach(([key, label]) => {
+                                const v = person.customRots[key];
+                                // 비틀림(t)이나 측방(b) 값이 조금이라도 수정된 경우만 출력
+                                if (v && (Math.abs(v.t) > 0.5 || Math.abs(v.b) > 0.5)) {
+                                    lines3D.push(`[수동 ${label}] 비틀: ${v.t}° | 측방: ${v.b}°`);
+                                }
+                            });
+                        }
+
+                        // 박스 높이를 텍스트 줄 수에 비례하여 동적 계산 (여백 12px + 줄당 16px)
+                        const box3DHeight = 12 + (lines3D.length * 16);
+
+                        // 연보라색 배경 박스 그리기
+                        ctx.fillStyle = '#f5f0ff';
+                        ctx.fillRect(tableX, box3DY, 240, box3DHeight);
+                        ctx.strokeStyle = '#c4b5fd';
+                        ctx.strokeRect(tableX, box3DY, 240, box3DHeight);
+
+                        // 3D 수치 텍스트 한 줄씩 작성
+                        ctx.fillStyle = '#6f42c1';
+                        ctx.font = 'bold 11px Arial';
+                        ctx.textAlign = 'center';
+
+                        lines3D.forEach((text, i) => {
+                            ctx.fillText(text, tableX + 120, box3DY + 18 + (i * 16));
+                        });
+                    }
                 });
 
                 // 5. 사용 후 캔버스 텍스트 정렬 상태 초기화 원복
