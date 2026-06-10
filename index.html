@@ -1804,7 +1804,7 @@
                     });
 
                     // 테이블 전체 외곽선 마감 치기
-                    ctx.strokeStyle = '#9CA3AF';
+                    ctx.strokeStyle = '#ffffff';
                     ctx.strokeRect(tableX, boxY, 240, rowHeight * 8);
 
                     const hasAuto3D = person.twistDeg !== undefined || person.shTiltDeg !== undefined || person.hipTiltDeg !== undefined;
@@ -1842,10 +1842,9 @@
 
                         // 연보라색 배경 박스 그리기
                         ctx.fillStyle = '#ffffff';
-                        ctx.fillRect(tableX, box3DY, 400, box3DHeight);
-                        ctx.strokeStyle = '#000000';
-                        ctx.lineWidth = 1;
-                        ctx.strokeRect(tableX, box3DY, 400, box3DHeight);
+                        ctx.fillRect(tableX, box3DY, 240, box3DHeight);
+                        ctx.strokeStyle = '#E5E7EB';                        
+                        ctx.strokeRect(tableX, box3DY, 240, box3DHeight);
 
                         // 3D 수치 텍스트 한 줄씩 작성
                         ctx.fillStyle = '#000000';
