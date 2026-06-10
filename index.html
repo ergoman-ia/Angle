@@ -2241,9 +2241,7 @@
                     const threeCanvas = document.getElementById('canvas3d');
                     const container2D = document.getElementById('modal3D2DContainer');
                     const canvas2D = document.getElementById('modal3D2DCanvas');
-                    const container = document.getElementById('canvas3d').parentElement;
-                    const w3d = Math.min(440, container.clientWidth * 0.45); // 전체 폭의 45%로 제한
-                    const h3d = w3d * 1.1; // 비율 유지
+                    const container = document.getElementById('canvas3d').parentElement;                   
 
                     if (threeCanvas && container2D && canvas2D) {
                         // 1. 현재 렌더링된 3D 캔버스의 가로/세로 크기 측정
