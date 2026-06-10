@@ -1841,13 +1841,14 @@
                         const box3DHeight = 12 + (lines3D.length * 16);
 
                         // 연보라색 배경 박스 그리기
-                        ctx.fillStyle = '#f5f0ff';
-                        ctx.fillRect(tableX, box3DY, 240, box3DHeight);
-                        ctx.strokeStyle = '#c4b5fd';
-                        ctx.strokeRect(tableX, box3DY, 240, box3DHeight);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillRect(tableX, box3DY, 400, box3DHeight);
+                        ctx.strokeStyle = '#000000';
+                        ctx.lineWidth = 1;
+                        ctx.strokeRect(tableX, box3DY, 400, box3DHeight);
 
                         // 3D 수치 텍스트 한 줄씩 작성
-                        ctx.fillStyle = '#6f42c1';
+                        ctx.fillStyle = '#000000';
                         ctx.font = 'bold 11px Arial';
                         ctx.textAlign = 'center';
 
