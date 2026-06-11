@@ -1603,9 +1603,10 @@
         elPivR.rotation.set(rEF, -customRots.lAMeshR.t * D, -customRots.lAMeshR.b * D);
         elPivL.rotation.set(lEF, customRots.lAMeshL.t * D, customRots.lAMeshL.b * D);
 
-        // 🔻 손목(Wrists)도 마찬가지로 오른쪽만 마이너스(-) 부호를 붙입니다.
-        wrPivR.rotation.set(-(a[4]?.angle ?? 0) * D, -customRots.wrPivR.t * D, -customRots.wrPivR.b * D);
-        wrPivL.rotation.set(-(a[8]?.angle ?? 0) * D, customRots.wrPivL.t * D, customRots.wrPivL.b * D);
+        // 손목 굽힘/젖힘: 손이 피벗 아래(-Y)에 매달리므로 +θ → 손바닥 쪽(-Z) 굽힘
+        // Twist(t), Side-bend(b)는 팔과 동일하게 오른쪽만 부호 반전 유지
+        wrPivR.rotation.set(+(a[4]?.angle ?? 0) * D, -customRots.wrPivR.t * D, -customRots.wrPivR.b * D);
+        wrPivL.rotation.set(+(a[8]?.angle ?? 0) * D, customRots.wrPivL.t * D, customRots.wrPivL.b * D);
 
         // 5. Legs (좌우 해부학적 대칭축 반전 적용)
         let FR = true;
