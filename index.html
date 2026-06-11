@@ -888,7 +888,7 @@
     ===================================================================== */
     document.getElementById('saveBtn').addEventListener('click', function () {
       const origH = c2.height;
-      const extraH = 400;
+      const extraH = 580;
       c2.height = origH + extraH;
       drawAll();
       drawExportTable(origH);
@@ -974,29 +974,87 @@
         });
         ctx.strokeStyle = '#aaa'; ctx.strokeRect(tableX, boxY, 240, rH * 8);
 
-        // 3D 보정값
+        // 3D 보정값 — 13개 부위 전부 포함
         const hasCR = person.customRots;
         const hasTw = person.twistDeg !== undefined;
         if (hasCR || hasTw) {
           const box3Y = boxY + rH * 8 + 8;
-          let lines = [];
+
+          // ① 자동 추정 수치
+          const autoLines = [];
           if (hasTw) {
-            lines.push(`[자동] 비틀림:${(person.twistDeg ?? 0).toFixed(1)}° | 어깨:${(person.shTiltDeg ?? 0).toFixed(1)}°`);
-            lines.push(`[자동] 골반 기울기: ${(person.hipTiltDeg ?? 0).toFixed(1)}°`);
+            autoLines.push(`비틀림:${(person.twistDeg??0).toFixed(1)}°  어깨:${(person.shTiltDeg??0).toFixed(1)}°  골반:${(person.hipTiltDeg??0).toFixed(1)}°`);
           }
+
+          // ② 수동 보정값 — 13개 부위 전부
+          const ALL_CR_PARTS = [
+            ['bodyRoot', '골반'],
+            ['torsoGrp', '몸통'],
+            ['nekPiv',   '목'],
+            ['shPivR',   '윗팔(우)'],
+            ['lAMeshR',  '아랫팔(우)'],
+            ['wrPivR',   '손(우)'],
+            ['shPivL',   '윗팔(좌)'],
+            ['lAMeshL',  '아랫팔(좌)'],
+            ['wrPivL',   '손(좌)'],
+            ['hipR',     '허벅지(우)'],
+            ['shMeshR',  '종아리(우)'],
+            ['hipL',     '허벅지(좌)'],
+            ['shMeshL',  '종아리(좌)']
+          ];
+          const manualLines = [];
           if (hasCR) {
-            const parts = [['torsoGrp', '몸통'], ['nekPiv', '목'], ['shPivR', '윗팔(우)'], ['shPivL', '윗팔(좌)'], ['hipR', '다리(우)'], ['hipL', '다리(좌)']];
-            parts.forEach(([key, label]) => {
+            ALL_CR_PARTS.forEach(([key, label]) => {
               const v = person.customRots[key];
-              if (v && (Math.abs(v.t) > 0.5 || Math.abs(v.b) > 0.5))
-                lines.push(`[수동 ${label}] 비틀:${v.t}° 측방:${v.b}°`);
+              if (v && (Math.abs(v.t) > 0.5 || Math.abs(v.b) > 0.5)) {
+                const ts = (v.t >= 0 ? '+' : '') + v.t;
+                const bs = (v.b >= 0 ? '+' : '') + v.b;
+                manualLines.push([label, `T:${ts}° B:${bs}°`]);
+              }
             });
           }
-          const bH = 12 + lines.length * 16;
-          ctx.fillStyle = '#fff'; ctx.fillRect(tableX, box3Y, 240, bH);
-          ctx.strokeStyle = '#E5E7EB'; ctx.strokeRect(tableX, box3Y, 240, bH);
-          ctx.fillStyle = '#000'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
-          lines.forEach((t, i) => ctx.fillText(t, tableX + 120, box3Y + 18 + i * 16));
+
+          if (autoLines.length === 0 && manualLines.length === 0) return;
+
+          // ③ 2컬럼 레이아웃으로 수동 보정값 그리기
+          const lh = 14;  // line height
+          const manualRows = Math.ceil(manualLines.length / 2);
+          const bH = 12 + (autoLines.length * 14) + (manualLines.length > 0 ? 14 : 0) + manualRows * lh + 8;
+
+          // 배경
+          ctx.fillStyle = '#F5F3FF';
+          ctx.fillRect(tableX, box3Y, 240, bH);
+          ctx.strokeStyle = '#C4B5FD'; ctx.lineWidth = 1;
+          ctx.strokeRect(tableX, box3Y, 240, bH);
+
+          let curY = box3Y + 13;
+
+          // 자동 수치 (1줄)
+          if (autoLines.length > 0) {
+            ctx.fillStyle = '#5B21B6'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+            ctx.fillText('[자동] ' + autoLines[0], tableX + 120, curY);
+            curY += 14;
+          }
+
+          // 수동 보정 헤더
+          if (manualLines.length > 0) {
+            ctx.fillStyle = '#6D28D9'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+            ctx.fillText('── 수동 보정값 ──', tableX + 120, curY);
+            curY += 13;
+
+            // 2컬럼 배치
+            ctx.font = '9px Arial'; ctx.textAlign = 'left';
+            manualLines.forEach((item, idx) => {
+              const col = idx % 2;
+              const row = Math.floor(idx / 2);
+              const x = tableX + 5 + col * 118;
+              const y = curY + row * lh;
+              ctx.fillStyle = '#374151';
+              ctx.fillText(item[0], x, y);
+              ctx.fillStyle = '#6D28D9';
+              ctx.fillText(item[1], x + 50, y);
+            });
+          }
         }
       });
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -1024,7 +1082,7 @@
 
         // 내보내기 이미지 생성
         const origH = c2.height;
-        c2.height = origH + 400;
+        c2.height = origH + 580;
         drawAll(); drawExportTable(origH);
         const rawExport = c2.toDataURL('image/png');
         c2.height = origH; drawAll();
@@ -1075,7 +1133,22 @@
         if (qs.empty) { alert('추출할 데이터가 없습니다.'); return; }
 
         let csv = '\uFEFF'; // UTF-8 BOM
-        csv += '현장명,저장일시,작업자,목,허리,윗팔(좌),윗팔(우),아랫팔(좌),아랫팔(우),손목(좌),손목(우),다리(좌),다리(우)\n';
+        // 2D 각도 13컬럼 + 3D 자동 3컬럼 + 수동 13부위×2(T/B) = 42컬럼
+        csv += '현장명,저장일시,작업자,' +
+          '목,허리,윗팔(좌),윗팔(우),아랫팔(좌),아랫팔(우),손목(좌),손목(우),다리(좌),다리(우),' +
+          '자동_비틀림,자동_어깨기울기,자동_골반기울기,' +
+          '골반_T,골반_B,몸통_T,몸통_B,목_T,목_B,' +
+          '윗팔우_T,윗팔우_B,아랫팔우_T,아랫팔우_B,손우_T,손우_B,' +
+          '윗팔좌_T,윗팔좌_B,아랫팔좌_T,아랫팔좌_B,손좌_T,손좌_B,' +
+          '허벅지우_T,허벅지우_B,종아리우_T,종아리우_B,' +
+          '허벅지좌_T,허벅지좌_B,종아리좌_T,종아리좌_B\n';
+
+        // customRots 단일 값 추출 헬퍼
+        const getCR = (crObj, key, field) => {
+          if (!crObj || !crObj[key]) return '0';
+          const v = crObj[key][field];
+          return (v !== undefined) ? v : '0';
+        };
 
         qs.forEach(docSnap => {
           const data = docSnap.data();
@@ -1089,8 +1162,29 @@
               if (!d) return '-';
               return d.angle < 0 ? `${Math.abs(d.angle).toFixed(0)}(젖힘)` : `${d.angle.toFixed(0)}`;
             };
-            csv += [site, time, `작업자 ${idx + 1}`,
-              ga(0), ga(1), ga(6), ga(2), ga(7), ga(3), ga(8), ga(4), ga(9), ga(5)
+            const cr = p.customRots || null;
+            csv += [
+              site, time, `작업자 ${idx + 1}`,
+              // 2D 각도
+              ga(0), ga(1), ga(6), ga(2), ga(7), ga(3), ga(8), ga(4), ga(9), ga(5),
+              // 3D 자동 추정
+              p.twistDeg  !== undefined ? p.twistDeg.toFixed(1)  : '-',
+              p.shTiltDeg !== undefined ? p.shTiltDeg.toFixed(1) : '-',
+              p.hipTiltDeg!== undefined ? p.hipTiltDeg.toFixed(1): '-',
+              // 3D 수동 보정 — 13부위 T/B 전부
+              getCR(cr,'bodyRoot','t'), getCR(cr,'bodyRoot','b'),
+              getCR(cr,'torsoGrp','t'), getCR(cr,'torsoGrp','b'),
+              getCR(cr,'nekPiv',  't'), getCR(cr,'nekPiv',  'b'),
+              getCR(cr,'shPivR',  't'), getCR(cr,'shPivR',  'b'),
+              getCR(cr,'lAMeshR', 't'), getCR(cr,'lAMeshR', 'b'),
+              getCR(cr,'wrPivR',  't'), getCR(cr,'wrPivR',  'b'),
+              getCR(cr,'shPivL',  't'), getCR(cr,'shPivL',  'b'),
+              getCR(cr,'lAMeshL', 't'), getCR(cr,'lAMeshL', 'b'),
+              getCR(cr,'wrPivL',  't'), getCR(cr,'wrPivL',  'b'),
+              getCR(cr,'hipR',    't'), getCR(cr,'hipR',    'b'),
+              getCR(cr,'shMeshR', 't'), getCR(cr,'shMeshR', 'b'),
+              getCR(cr,'hipL',    't'), getCR(cr,'hipL',    'b'),
+              getCR(cr,'shMeshL', 't'), getCR(cr,'shMeshL', 'b')
             ].join(',') + '\n';
           });
         });
