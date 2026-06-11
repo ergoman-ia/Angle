@@ -284,17 +284,19 @@
   <script type="module">
     import { firebaseConfig } from './secrets.js';
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
-    import { getFirestore, doc, setDoc, updateDoc, deleteDoc,
-             collection, getDocs, serverTimestamp }
+    import {
+      getFirestore, doc, setDoc, updateDoc, deleteDoc,
+      collection, getDocs, serverTimestamp
+    }
       from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
     const app = initializeApp(firebaseConfig);
-    window.fbDb        = getFirestore(app);
-    window.fsDoc       = doc;
-    window.fsSetDoc    = setDoc;
+    window.fbDb = getFirestore(app);
+    window.fsDoc = doc;
+    window.fsSetDoc = setDoc;
     window.fsUpdateDoc = updateDoc;
     window.fsDeleteDoc = deleteDoc;
-    window.fsCollection= collection;
-    window.fsGetDocs   = getDocs;
+    window.fsCollection = collection;
+    window.fsGetDocs = getDocs;
     window.fsServerTimestamp = serverTimestamp;
   </script>
 
@@ -307,71 +309,149 @@
       padding: 15px 20px;
       background: #fff;
       border-radius: 10px;
-      box-shadow: 0 2px 5px rgba(0,0,0,.1);
+      box-shadow: 0 2px 5px rgba(0, 0, 0, .1);
       box-sizing: border-box;
     }
+
     #galleryWrapper h3 {
-      font-size: 14px; font-weight: bold; color: #444;
-      margin-bottom: 12px; border-bottom: 2px dashed #ccc; padding-bottom: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      color: #444;
+      margin-bottom: 12px;
+      border-bottom: 2px dashed #ccc;
+      padding-bottom: 8px;
     }
+
     .gallery-container {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
       gap: 12px;
     }
+
     .thumb-card {
-      position: relative; background: #fff;
-      border: 1px solid #ddd; border-radius: 6px;
-      padding: 4px 4px 1px; cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0,0,0,.05);
+      position: relative;
+      background: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 4px 4px 1px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, .05);
       transition: transform .2s, box-shadow .2s;
     }
-    .thumb-card:hover { transform: translateY(-3px); box-shadow: 0 4px 8px rgba(0,0,0,.15); }
+
+    .thumb-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, .15);
+    }
+
     .thumb-card img {
-      width: 100%; height: 90px;
-      object-fit: contain; background: #f8f9fa; border-radius: 4px;
+      width: 100%;
+      height: 90px;
+      object-fit: contain;
+      background: #f8f9fa;
+      border-radius: 4px;
     }
+
     .thumb-card-label {
-      font-size: 11px; color: #555; text-align: center;
-      padding: 3px 2px 2px; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      padding: 3px 2px 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
+
     .btn-delete-thumb {
-      position: absolute; top: -8px; right: -8px;
-      background: #dc3545; color: #fff; border: none;
-      border-radius: 50%; width: 24px; height: 24px;
-      font-size: 12px; font-weight: bold; cursor: pointer;
-      box-shadow: 0 2px 4px rgba(0,0,0,.2); z-index: 10;
-      display: flex; align-items: center; justify-content: center; padding: 0;
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: #dc3545;
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, .2);
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
     }
-    .btn-delete-thumb:hover { background: #c82333; }
+
+    .btn-delete-thumb:hover {
+      background: #c82333;
+    }
 
     /* ===== DB / Print / CSV 버튼 ===== */
     .db-btn-group {
-      display: flex; flex-direction: column; gap: 8px; margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 10px;
     }
+
     .db-btn-group input[type=text] {
-      padding: 8px 10px; border: 1px solid #ccc;
-      border-radius: 4px; font-size: 13px; width: 100%; box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 13px;
+      width: 100%;
+      box-sizing: border-box;
     }
+
     .btn-save-db {
-      background: #007BFF; color: #fff; border: none;
-      padding: 10px 0; border-radius: 5px; font-size: 14px;
-      font-weight: bold; cursor: pointer; width: 100%;
+      background: #007BFF;
+      color: #fff;
+      border: none;
+      padding: 10px 0;
+      border-radius: 5px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
       transition: background-color .3s;
     }
-    .btn-save-db:hover { background: #0056b3; }
+
+    .btn-save-db:hover {
+      background: #0056b3;
+    }
+
     .btn-row-2 {
-      display: flex; gap: 8px;
+      display: flex;
+      gap: 8px;
     }
+
     .btn-row-2 button {
-      flex: 1; padding: 9px 0; border: none; border-radius: 5px;
-      font-size: 13px; font-weight: bold; color: #fff; cursor: pointer;
+      flex: 1;
+      padding: 9px 0;
+      border: none;
+      border-radius: 5px;
+      font-size: 13px;
+      font-weight: bold;
+      color: #fff;
+      cursor: pointer;
     }
-    .btn-print  { background: #28a745; }
-    .btn-print:hover  { background: #218838; }
-    .btn-csv    { background: #17a2b8; }
-    .btn-csv:hover    { background: #138496; }
+
+    .btn-print {
+      background: #28a745;
+    }
+
+    .btn-print:hover {
+      background: #218838;
+    }
+
+    .btn-csv {
+      background: #17a2b8;
+    }
+
+    .btn-csv:hover {
+      background: #138496;
+    }
 
     /* ===== 하단 2열 행 ===== */
     .sub-row {
@@ -381,11 +461,13 @@
       align-items: flex-start;
       justify-content: center;
     }
+
     /* 2D(900) + gap(20) + 3D(500) */
     .sub-gallery {
       flex: 0 0 1420px;
       min-height: 140px;
     }
+
     /* controls 패널과 동일 폭 */
     .sub-ctrl {
       flex: 0 0 280px;
@@ -476,7 +558,7 @@
         <button class="btn-save-db" id="saveDbBtn">클라우드(DB)에 저장</button>
         <div class="btn-row-2">
           <button class="btn-print" id="saveBtn">🖨 이미지 인쇄</button>
-          <button class="btn-csv"   id="exportCsvBtn">📊 DB to CSV</button>
+          <button class="btn-csv" id="exportCsvBtn">📊 DB to CSV</button>
         </div>
       </div>
     </div>
@@ -812,7 +894,7 @@
       drawExportTable(origH);
       setTimeout(() => {
         const now = new Date();
-        const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+        const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
         const link = document.createElement('a');
         link.download = `전체작업자_자세분석_${ts}.png`;
         link.href = c2.toDataURL('image/png');
@@ -851,17 +933,17 @@
         ctx.strokeStyle = '#D1D5DB'; ctx.lineWidth = 1;
         ctx.strokeRect(tableX, boxY + rH, 240, rH);
         ctx.fillStyle = '#374151'; ctx.font = 'bold 11px Arial';
-        ctx.fillText('부위',  tableX + 30,  boxY + rH + 4);
-        ctx.fillText('왼쪽',  tableX + 105, boxY + rH + 4);
-        ctx.fillText('오른쪽',tableX + 185, boxY + rH + 4);
+        ctx.fillText('부위', tableX + 30, boxY + rH + 4);
+        ctx.fillText('왼쪽', tableX + 105, boxY + rH + 4);
+        ctx.fillText('오른쪽', tableX + 185, boxY + rH + 4);
 
         const displayRows = [
-          { label:'목',     idxL:0, idxR:0, single:true },
-          { label:'허리',   idxL:1, idxR:1, single:true },
-          { label:'윗팔',   idxL:6, idxR:2, single:false },
-          { label:'아랫팔', idxL:7, idxR:3, single:false },
-          { label:'손목',   idxL:8, idxR:4, single:false },
-          { label:'다리',   idxL:9, idxR:5, single:false }
+          { label: '목', idxL: 0, idxR: 0, single: true },
+          { label: '허리', idxL: 1, idxR: 1, single: true },
+          { label: '윗팔', idxL: 6, idxR: 2, single: false },
+          { label: '아랫팔', idxL: 7, idxR: 3, single: false },
+          { label: '손목', idxL: 8, idxR: 4, single: false },
+          { label: '다리', idxL: 9, idxR: 5, single: false }
         ];
         const getVal = (i) => {
           const d = person.angles[i];
@@ -879,31 +961,31 @@
           if (row.single) {
             ctx.fillText(getVal(row.idxR), tableX + 145, rowY + 4);
             ctx.strokeStyle = '#E5E7EB';
-            ctx.beginPath(); ctx.moveTo(tableX+60, rowY); ctx.lineTo(tableX+60, rowY+rH); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(tableX + 60, rowY); ctx.lineTo(tableX + 60, rowY + rH); ctx.stroke();
           } else {
             ctx.fillText(getVal(row.idxL), tableX + 105, rowY + 4);
             ctx.fillText(getVal(row.idxR), tableX + 185, rowY + 4);
             ctx.strokeStyle = '#E5E7EB';
             ctx.beginPath();
-            ctx.moveTo(tableX+60,  rowY); ctx.lineTo(tableX+60,  rowY+rH);
-            ctx.moveTo(tableX+150, rowY); ctx.lineTo(tableX+150, rowY+rH);
+            ctx.moveTo(tableX + 60, rowY); ctx.lineTo(tableX + 60, rowY + rH);
+            ctx.moveTo(tableX + 150, rowY); ctx.lineTo(tableX + 150, rowY + rH);
             ctx.stroke();
           }
         });
-        ctx.strokeStyle = '#aaa'; ctx.strokeRect(tableX, boxY, 240, rH*8);
+        ctx.strokeStyle = '#aaa'; ctx.strokeRect(tableX, boxY, 240, rH * 8);
 
         // 3D 보정값
         const hasCR = person.customRots;
         const hasTw = person.twistDeg !== undefined;
         if (hasCR || hasTw) {
-          const box3Y = boxY + rH*8 + 8;
+          const box3Y = boxY + rH * 8 + 8;
           let lines = [];
           if (hasTw) {
-            lines.push(`[자동] 비틀림:${(person.twistDeg??0).toFixed(1)}° | 어깨:${(person.shTiltDeg??0).toFixed(1)}°`);
-            lines.push(`[자동] 골반 기울기: ${(person.hipTiltDeg??0).toFixed(1)}°`);
+            lines.push(`[자동] 비틀림:${(person.twistDeg ?? 0).toFixed(1)}° | 어깨:${(person.shTiltDeg ?? 0).toFixed(1)}°`);
+            lines.push(`[자동] 골반 기울기: ${(person.hipTiltDeg ?? 0).toFixed(1)}°`);
           }
           if (hasCR) {
-            const parts = [['torsoGrp','몸통'],['nekPiv','목'],['shPivR','윗팔(우)'],['shPivL','윗팔(좌)'],['hipR','다리(우)'],['hipL','다리(좌)']];
+            const parts = [['torsoGrp', '몸통'], ['nekPiv', '목'], ['shPivR', '윗팔(우)'], ['shPivL', '윗팔(좌)'], ['hipR', '다리(우)'], ['hipL', '다리(좌)']];
             parts.forEach(([key, label]) => {
               const v = person.customRots[key];
               if (v && (Math.abs(v.t) > 0.5 || Math.abs(v.b) > 0.5))
@@ -914,7 +996,7 @@
           ctx.fillStyle = '#fff'; ctx.fillRect(tableX, box3Y, 240, bH);
           ctx.strokeStyle = '#E5E7EB'; ctx.strokeRect(tableX, box3Y, 240, bH);
           ctx.fillStyle = '#000'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
-          lines.forEach((t, i) => ctx.fillText(t, tableX+120, box3Y+18+i*16));
+          lines.forEach((t, i) => ctx.fillText(t, tableX + 120, box3Y + 18 + i * 16));
         }
       });
       ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -929,7 +1011,7 @@
       }
       const siteName = (document.getElementById('siteName').value.trim()) || '미지정 현장';
       const now = new Date();
-      const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+      const ts = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
       const isUpdating = (currentEditSessionId !== null);
       const sessionId = isUpdating ? currentEditSessionId : `session_${ts}`;
       const fileBtn = document.getElementById('fileBtn');
@@ -948,17 +1030,17 @@
         c2.height = origH; drawAll();
 
         statusMsg.textContent = '이미지 압축 중...';
-        const compOrig   = await compressImage(originalImageDataUrl, 1000, 0.6);
+        const compOrig = await compressImage(originalImageDataUrl, 1000, 0.6);
         const compExport = await compressImage(rawExport, 1000, 0.6);
 
         statusMsg.textContent = 'DB 전송 중...';
         const cleanPL = JSON.parse(JSON.stringify(window.PL));
-        const docRef  = window.fsDoc(window.fbDb, 'sessions', sessionId);
+        const docRef = window.fsDoc(window.fbDb, 'sessions', sessionId);
         const payload = {
           siteName,
           personDataList: JSON.stringify(cleanPL),
           originalImageData: compOrig,
-          exportImageData:   compExport
+          exportImageData: compExport
         };
         if (isUpdating) {
           payload.updatedAt = window.fsServerTimestamp();
@@ -1000,28 +1082,28 @@
           const site = (data.siteName || '미지정').replace(/,/g, ' ');
           const time = docSnap.id.replace('session_', '');
           let persons = [];
-          try { persons = JSON.parse(data.personDataList); } catch(e) {}
+          try { persons = JSON.parse(data.personDataList); } catch (e) { }
           persons.forEach((p, idx) => {
             const ga = (i) => {
               const d = p.angles[i];
               if (!d) return '-';
               return d.angle < 0 ? `${Math.abs(d.angle).toFixed(0)}(젖힘)` : `${d.angle.toFixed(0)}`;
             };
-            csv += [site, time, `작업자 ${idx+1}`,
-              ga(0),ga(1),ga(6),ga(2),ga(7),ga(3),ga(8),ga(4),ga(9),ga(5)
+            csv += [site, time, `작업자 ${idx + 1}`,
+              ga(0), ga(1), ga(6), ga(2), ga(7), ga(3), ga(8), ga(4), ga(9), ga(5)
             ].join(',') + '\n';
           });
         });
 
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url  = URL.createObjectURL(blob);
+        const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        const now  = new Date();
-        const ds   = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
+        const now = new Date();
+        const ds = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
         link.href = url; link.download = `자세분석_DB전체데이터_${ds}.csv`;
         document.body.appendChild(link); link.click(); document.body.removeChild(link);
         statusMsg.textContent = 'CSV 추출 완료'; statusMsg.style.color = '#22c55e';
-      } catch(err) {
+      } catch (err) {
         console.error(err);
         alert('CSV 추출 중 오류가 발생했습니다.');
         statusMsg.textContent = 'CSV 추출 실패'; statusMsg.style.color = '#e74c3c';
@@ -1042,7 +1124,7 @@
         }
         qs.forEach(docSnap => {
           const data = docSnap.data();
-          const sid  = docSnap.id;
+          const sid = docSnap.id;
           const card = document.createElement('div');
           card.className = 'thumb-card';
           card.innerHTML = `
@@ -1056,7 +1138,7 @@
           });
           gallery.appendChild(card);
         });
-      } catch(err) {
+      } catch (err) {
         console.error(err);
         gallery.innerHTML = '<p style="color:red;">데이터를 불러오는데 실패했습니다.</p>';
       }
@@ -1065,7 +1147,7 @@
     function loadSessionForEdit(sessionId, data) {
       statusMsg.textContent = '데이터 불러오는 중...'; statusMsg.style.color = '#f59e0b';
       currentEditSessionId = sessionId;
-      document.getElementById('siteName').value  = data.siteName || '';
+      document.getElementById('siteName').value = data.siteName || '';
       document.getElementById('saveDbBtn').textContent = '클라우드(DB) 업데이트';
 
       img = new Image();
@@ -1105,7 +1187,7 @@
         }
         await loadGallery();
         statusMsg.textContent = '삭제 완료'; statusMsg.style.color = '#22c55e';
-      } catch(err) {
+      } catch (err) {
         console.error(err); alert('삭제 중 오류가 발생했습니다.');
         statusMsg.textContent = '삭제 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
@@ -1146,7 +1228,13 @@
     (function () {
       'use strict';
       const D = Math.PI / 180;
-      const B = { pelH: .15, pelW: .32, pelD: .20, torH: .50, torTopW: .42, torBotW: .28, torD: .22, nekH: .11, nekR: .055, hedR: .13, uAL: .30, uAR: .040, lAL: .26, lAR: .033, thL: .43, thR: .063, shL: .38, shR: .050, handL: .10, handW: .07, handD: .02 };
+      const B = {
+        pelH: .15, pelW: .32, pelD: .20, torH: .50, torTopW: .42, torBotW: .28, torD: .22, nekH: .11, nekR: .055, hedR: .13, uAL: .30, uAR: .040, lAL: .26, lAR: .033, thL: .43, thR: .063, shL: .38, shR: .050, handL: .10, handW: .07, handD: .02,
+        footL: .22,   // 발 앞뒤 길이
+        footW: .09,   // 발 좌우 너비
+        footH: .05,   // 발 두께
+        footToeZ: .15 // 발목 기준 앞쪽 비율 (발가락 방향)
+      };
 
       // --- Scene ---
       const c3 = document.getElementById('canvas3d');
@@ -1167,9 +1255,9 @@
       const fill = new THREE.DirectionalLight(0x8899ff, .6); fill.position.set(-2, 1, -2); scene.add(fill);
       const back = new THREE.DirectionalLight(0x223344, .4); back.position.set(0, -2, -2); scene.add(back);
 
-      // Grid
       const grid = new THREE.GridHelper(3, 18, 0xcccccc, 0xeeeeee);
-      grid.position.y = -(B.pelH / 2 + B.thL + B.shL + .02); scene.add(grid);
+      // 발 두께(footH)만큼 내려서 발바닥이 그리드 위에 살짝 뜨도록
+      grid.position.y = -(B.pelH / 2 + B.thL + B.shL + B.footH + .02); scene.add(grid);
 
       // Shadow floor
       const floor = new THREE.Mesh(new THREE.PlaneGeometry(4, 4), new THREE.ShadowMaterial({ opacity: .25 }));
@@ -1177,7 +1265,9 @@
 
       // --- Materials ---
       function mat(hex) { const m = new THREE.MeshPhongMaterial({ color: hex, shininess: 55, specular: 0x335577 }); m.side = THREE.DoubleSide; return m; }
-      const M = { head: mat(0xf0c090), neck: mat(0xee99aa), torso: mat(0x3366cc), pelvis: mat(0x6633aa), uAR: mat(0x3399ff), lAR: mat(0x44bbff), uAL: mat(0x3399ff), lAL: mat(0x44bbff), thR: mat(0x2255ee), shR: mat(0x3377cc), thL: mat(0x2255ee), shL: mat(0x3377cc), hand: mat(0xf0c090) };
+      const M = { head: mat(0xf0c090), neck: mat(0xee99aa), torso: mat(0x3366cc), pelvis: mat(0x6633aa), uAR: mat(0x3399ff), lAR: mat(0x44bbff), uAL: mat(0x3399ff), lAL: mat(0x44bbff), thR: mat(0x2255ee), shR: mat(0x3377cc), thL: mat(0x2255ee), shL: mat(0x3377cc), hand: mat(0xf0c090),
+        foot: mat(0xd4956a)   // 발 색상 (약간 어두운 피부색)
+      };
 
       // --- Limb builder ---
       function limb(len, rTop, rBot, mat, up = false) {
@@ -1210,6 +1300,71 @@
       const { g: thGrpL, mesh: thMeshL } = limb(B.thL, B.thR, B.thR * .87, M.thL); hipL.add(thGrpL);
       const kneeL = new THREE.Group(); kneeL.position.y = -B.thL; thGrpL.add(kneeL);
       const { g: shGrpL, mesh: shMeshL } = limb(B.shL, B.shR, B.shR * .78, M.shL); kneeL.add(shGrpL);
+
+      // ── 발 (분석 외, 형상 전용) ──────────────────────────────────────
+      // 발은 종아리 그룹의 자식 → 무릎 굽힘 시 자동으로 따라감
+      // 종아리(-Y)에 대해 90° = 수평(Z축 방향)이 되도록 배치
+
+      // 발 생성 헬퍼: 발목 구 + 발 박스 + 발가락 테이퍼 박스
+      function makeFoot(side) {
+        const grp = new THREE.Group();
+
+        // ① 발목 구 (복사뼈 느낌)
+        const ankleBall = new THREE.Mesh(
+          new THREE.SphereGeometry(B.shR * 1.05, 10, 7),
+          M.foot
+        );
+        ankleBall.castShadow = true;
+        grp.add(ankleBall);
+
+        // ② 발 본체 (박스)
+        //    발목 기준: 뒤꿈치(-Z)는 30%, 앞쪽(+Z)은 70%
+        const bodyGeo = new THREE.BoxGeometry(B.footW, B.footH, B.footL);
+        const bodyMesh = new THREE.Mesh(bodyGeo, M.foot);
+        bodyMesh.castShadow = true;
+        bodyMesh.receiveShadow = true;
+        // 발목(y=0)에서 아래로 내리고, Z 오프셋으로 앞뒤 비율 조정
+        bodyMesh.position.set(0, -B.footH * 0.5, B.footL * 0.20);
+        grp.add(bodyMesh);
+
+        // ③ 발가락 부분 (앞쪽으로 살짝 테이퍼 & 낮음)
+        const toeGeo = new THREE.BoxGeometry(B.footW * 0.80, B.footH * 0.60, B.footL * 0.28);
+        const toeMesh = new THREE.Mesh(toeGeo, M.foot);
+        toeMesh.castShadow = true;
+        toeMesh.position.set(
+          0,
+          -B.footH * 0.70,                          // 발바닥 높이에 맞춤
+          B.footL * 0.20 + B.footL * 0.50 * 0.5    // 발 앞쪽 끝
+        );
+        grp.add(toeMesh);
+
+        // ④ 뒤꿈치 (약간 두껍게)
+        const heelGeo = new THREE.BoxGeometry(B.footW * 0.85, B.footH * 1.10, B.footL * 0.22);
+        const heelMesh = new THREE.Mesh(heelGeo, M.foot);
+        heelMesh.castShadow = true;
+        heelMesh.position.set(
+          0,
+          -B.footH * 0.45,
+          B.footL * 0.20 - B.footL * 0.78 * 0.5    // 발 뒤쪽
+        );
+        grp.add(heelMesh);
+
+        return grp;
+      }
+
+      // 오른발 : 종아리(shGrpR) 바닥에 붙임
+      const ankleGrpR = new THREE.Group();
+      ankleGrpR.position.y = -B.shL;  // 종아리 끝 = 발목 위치
+      shGrpR.add(ankleGrpR);
+      const footGrpR = makeFoot('R');
+      ankleGrpR.add(footGrpR);
+
+      // 왼발 : 종아리(shGrpL) 바닥에 붙임
+      const ankleGrpL = new THREE.Group();
+      ankleGrpL.position.y = -B.shL;
+      shGrpL.add(ankleGrpL);
+      const footGrpL = makeFoot('L');
+      ankleGrpL.add(footGrpL);
 
       // Spine base — torsoGrp adds TWIST relative to pelvis
       const spineBase = new THREE.Group(); spineBase.position.y = B.pelH / 2; bodyRoot.add(spineBase);
@@ -1324,17 +1479,17 @@
       const ROM = {
         bodyRoot: { t: [-45, 45], b: [-30, 30] },     // 골반
         torsoGrp: { t: [-50, 50], b: [-45, 45] },     // 몸통 (흉요추)
-        nekPiv:   { t: [-80, 80], b: [-45, 45] },     // 목 (경추)
-        shPivR:   { t: [-90, 90], b: [-180, 180] },   // 우측 어깨 (내외전, 외전/신전)
-        shPivL:   { t: [-90, 90], b: [-180, 180] },   // 좌측 어깨
-        lAMeshR:  { t: [-90, 90], b: [-150, 150] },   // 우측 팔꿈치 (회내/회외, 굴곡)
-        lAMeshL:  { t: [-90, 90], b: [-150, 150] },   // 좌측 팔꿈치
-        wrPivR:   { t: [-40, 30], b: [-80, 80] },     // 우측 손목 (요굴/척굴, 굴곡/신전)
-        wrPivL:   { t: [-40, 30], b: [-80, 80] },     // 좌측 손목
-        hipR:     { t: [-45, 45], b: [-50, 50] },     // 우측 고관절 (허벅지)
-        hipL:     { t: [-45, 45], b: [-50, 50] },     // 좌측 고관절
-        shMeshR:  { t: [-30, 30], b: [-15, 15] },     // 우측 무릎 (종아리)
-        shMeshL:  { t: [-30, 30], b: [-15, 15] }      // 좌측 무릎
+        nekPiv: { t: [-80, 80], b: [-45, 45] },     // 목 (경추)
+        shPivR: { t: [-90, 90], b: [-180, 180] },   // 우측 어깨 (내외전, 외전/신전)
+        shPivL: { t: [-90, 90], b: [-180, 180] },   // 좌측 어깨
+        lAMeshR: { t: [-90, 90], b: [-150, 150] },   // 우측 팔꿈치 (회내/회외, 굴곡)
+        lAMeshL: { t: [-90, 90], b: [-150, 150] },   // 좌측 팔꿈치
+        wrPivR: { t: [-40, 30], b: [-80, 80] },     // 우측 손목 (요굴/척굴, 굴곡/신전)
+        wrPivL: { t: [-40, 30], b: [-80, 80] },     // 좌측 손목
+        hipR: { t: [-45, 45], b: [-50, 50] },     // 우측 고관절 (허벅지)
+        hipL: { t: [-45, 45], b: [-50, 50] },     // 좌측 고관절
+        shMeshR: { t: [-30, 30], b: [-15, 15] },     // 우측 무릎 (종아리)
+        shMeshL: { t: [-30, 30], b: [-15, 15] }      // 좌측 무릎
       };
 
       // 현재 선택된 작업자(pd)만의 전용 미세조정 데이터를 반환(없으면 생성)하는 함수
