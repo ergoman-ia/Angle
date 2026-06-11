@@ -1309,7 +1309,7 @@
       function makeFoot(side) {
         const grp = new THREE.Group();
 
-        // ① 발목 구 (복사뼈 느낌)
+        // ① 발목 구 (복사뼈) — Z=0, 발목 관절점에 위치
         const ankleBall = new THREE.Mesh(
           new THREE.SphereGeometry(B.shR * 1.05, 10, 7),
           M.foot
@@ -1317,35 +1317,36 @@
         ankleBall.castShadow = true;
         grp.add(ankleBall);
 
-        // ② 발 본체 (박스)
-        //    발목 기준: 뒤꿈치(-Z)는 30%, 앞쪽(+Z)은 70%
+        // ② 발 본체
+        //    모델 정면 = -Z  →  발가락 끝: -Z  /  뒤꿈치: +Z
+        //    발목 기준 앞쪽(발가락) 70%, 뒤쪽(뒤꿈치) 30%
+        //    center offset = -(0.70 - 0.50) * footL = -0.20 * footL
         const bodyGeo = new THREE.BoxGeometry(B.footW, B.footH, B.footL);
         const bodyMesh = new THREE.Mesh(bodyGeo, M.foot);
         bodyMesh.castShadow = true;
         bodyMesh.receiveShadow = true;
-        // 발목(y=0)에서 아래로 내리고, Z 오프셋으로 앞뒤 비율 조정
-        bodyMesh.position.set(0, -B.footH * 0.5, B.footL * 0.20);
+        bodyMesh.position.set(0, -B.footH * 0.5, -B.footL * 0.20);
         grp.add(bodyMesh);
 
-        // ③ 발가락 부분 (앞쪽으로 살짝 테이퍼 & 낮음)
+        // ③ 발가락 부분 (앞쪽 -Z, 살짝 낮고 좁음)
         const toeGeo = new THREE.BoxGeometry(B.footW * 0.80, B.footH * 0.60, B.footL * 0.28);
         const toeMesh = new THREE.Mesh(toeGeo, M.foot);
         toeMesh.castShadow = true;
         toeMesh.position.set(
           0,
-          -B.footH * 0.70,                          // 발바닥 높이에 맞춤
-          B.footL * 0.20 + B.footL * 0.50 * 0.5    // 발 앞쪽 끝
+          -B.footH * 0.70,
+          -B.footL * 0.20 - B.footL * 0.50 * 0.5   // 발 앞쪽 끝 (-Z 방향)
         );
         grp.add(toeMesh);
 
-        // ④ 뒤꿈치 (약간 두껍게)
+        // ④ 뒤꿈치 (뒤쪽 +Z, 약간 두껍게)
         const heelGeo = new THREE.BoxGeometry(B.footW * 0.85, B.footH * 1.10, B.footL * 0.22);
         const heelMesh = new THREE.Mesh(heelGeo, M.foot);
         heelMesh.castShadow = true;
         heelMesh.position.set(
           0,
           -B.footH * 0.45,
-          B.footL * 0.20 - B.footL * 0.78 * 0.5    // 발 뒤쪽
+          -B.footL * 0.20 + B.footL * 0.78 * 0.5   // 발 뒤쪽 (+Z 방향, 카메라 쪽)
         );
         grp.add(heelMesh);
 
