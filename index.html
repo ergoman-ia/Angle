@@ -888,7 +888,7 @@
     ===================================================================== */
     document.getElementById('saveBtn').addEventListener('click', function () {
       const origH = c2.height;
-      const extraH = 580;
+      const extraH = 400;
       c2.height = origH + extraH;
       drawAll();
       drawExportTable(origH);
@@ -1082,7 +1082,7 @@
 
         // 내보내기 이미지 생성
         const origH = c2.height;
-        c2.height = origH + 580;
+        c2.height = origH + 400;
         drawAll(); drawExportTable(origH);
         const rawExport = c2.toDataURL('image/png');
         c2.height = origH; drawAll();
