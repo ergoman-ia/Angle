@@ -55,7 +55,7 @@
     }
 
     .panel-2d {
-      flex: 0 0 900px
+      flex: 0 0 910px
     }
 
     .panel-3d {
@@ -1009,7 +1009,7 @@
               if (v && (Math.abs(v.t) > 0.5 || Math.abs(v.b) > 0.5)) {
                 const ts = (v.t >= 0 ? '+' : '') + v.t;
                 const bs = (v.b >= 0 ? '+' : '') + v.b;
-                manualLines.push([label, `T:${ts}° B:${bs}°`]);
+                manualLines.push([label, `T:${ts}° B_S:${bs}°`]);
               }
             });
           }
