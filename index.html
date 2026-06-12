@@ -818,7 +818,7 @@
           let FR = getFR(ad); // 통합 방향 판별 함수
 
           if (corr === 1) { 
-            // 🌟 허리(Trunk) 수동 입력: Y좌표 기반 자동 정렬 (클릭 순서 무관)
+            // 🌟 허리(Trunk) 수동 입력: Y좌표 기반 자동 정렬
             const sorted = [...pts].sort((A, B) => A.y - B.y);
             const sh = sorted[0], hip = sorted[1];
             const d = Math.hypot(sh.x - hip.x, sh.y - hip.y) || 1;
@@ -826,17 +826,22 @@
             a = ang3(pts[0], pts[1], pts[2]);
             if (FR ? sh.x < hip.x : sh.x > hip.x) a = -a;
           } else if (corr === 0) {
-            // 🌟 목(Neck) 수동 입력: Y좌표 기반 자동 정렬 및 AI 기준점(pRef) 완벽 동기화
+            // 🌟 목(Neck) 수동 입력: Y좌표 기반 자동 정렬 및 가상 기준점
             const sorted = [...pts].sort((A, B) => A.y - B.y);
             const ear = sorted[0], sh = sorted[1], hip = sorted[2];
             const dx = sh.x - hip.x, dy = sh.y - hip.y, len = Math.hypot(dx, dy) || 1;
-            // AI 로직과 동일하게 어깨에서 위로 뻗어나가는 가상 기준점 생성
             const pRef = { x: sh.x + (dx / len) * (len * .5), y: sh.y + (dy / len) * (len * .5) };
             pts = [ear, sh, pRef];
             a = ang3(pts[0], pts[1], pts[2]);
             if (FR ? (dx * (ear.y - sh.y) - dy * (ear.x - sh.x)) < 0 : (dx * (ear.y - sh.y) - dy * (ear.x - sh.x)) > 0) a = -a;
+          } else if (corr === 5 || corr === 9) {
+            // 🌟 다리(Leg) 수동 입력: Y좌표 기반 자동 정렬 (무조건 골반 ➔ 무릎 ➔ 발목)
+            const sorted = [...pts].sort((A, B) => A.y - B.y);
+            pts = sorted;
+            a = ang3(pts[0], pts[1], pts[2]);
+            if (INV.includes(corr)) a = 180 - a;
           } else {
-            // 팔/다리 수동 입력
+            // 팔 등 기타 수동 입력
             a = ang3(...pts); 
             if (INV.includes(corr)) a = 180 - a;
           }
@@ -1875,29 +1880,29 @@
         wrPivL.rotation.set(+(a[8]?.angle ?? 0) * D, customRots.wrPivL.t * D, customRots.wrPivL.b * D);
 
         // 5. Legs (좌우 해부학적 대칭축 반전 적용)
+        // 5. Legs (좌우 해부학적 대칭축 반전 적용)
         let FR = getFR(pd);
 
         // 오른쪽 고관절 계산 로직 보완
         if (a[5] && a[5].points && a[5].points.length >= 2) {
           let ang = Math.atan2(a[5].points[1].x - a[5].points[0].x, a[5].points[1].y - a[5].points[0].y);
-          // 🔻 골반 기준선(trunkFlex)을 고려하여 다리 각도 보정
           let rotX = FR ? ang : -ang;
-          hipR.rotation.set(rotX - trunkFlex, -customRots.hipR.t * D, -customRots.hipR.b * D);
+          hipR.rotation.set(rotX, -customRots.hipR.t * D, -customRots.hipR.b * D);
         } else if (k && k[12].score > .25 && k[14].score > .25) {
           let ang = Math.atan2(k[14].x - k[12].x, k[14].y - k[12].y);
           let rotX = FR ? ang : -ang;
-          hipR.rotation.set(rotX - trunkFlex, -customRots.hipR.t * D, -customRots.hipR.b * D);
+          hipR.rotation.set(rotX, -customRots.hipR.t * D, -customRots.hipR.b * D);
         }
 
         // 왼쪽 고관절 계산 로직 보완
         if (a[9] && a[9].points && a[9].points.length >= 2) {
           let ang = Math.atan2(a[9].points[1].x - a[9].points[0].x, a[9].points[1].y - a[9].points[0].y);
           let rotX = FR ? ang : -ang;
-          hipL.rotation.set(rotX - trunkFlex, customRots.hipL.t * D, customRots.hipL.b * D);
+          hipL.rotation.set(rotX, customRots.hipL.t * D, customRots.hipL.b * D);
         } else if (k && k[11].score > .25 && k[13].score > .25) {
           let ang = Math.atan2(k[13].x - k[11].x, k[13].y - k[11].y);
           let rotX = FR ? ang : -ang;
-          hipL.rotation.set(rotX - trunkFlex, customRots.hipL.t * D, customRots.hipL.b * D);
+          hipL.rotation.set(rotX, customRots.hipL.t * D, customRots.hipL.b * D);
         }
 
         // 🔻 오른쪽 무릎(t, b)에 마이너스(-) 적용
