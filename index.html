@@ -778,9 +778,39 @@
         tmpPts.push({ x: rx, y: ry });
         if (tmpPts.length === 3) {
           let pts = [...tmpPts], a = 0;
-          if (corr === 1) { const sh = tmpPts[0], hip = tmpPts[1], d = Math.hypot(sh.x - hip.x, sh.y - hip.y); pts = [{ x: hip.x, y: hip.y - d }, hip, sh]; a = ang3(pts[0], pts[1], pts[2]); }
-          else { a = ang3(...tmpPts); if (INV.includes(corr)) a = 180 - a; }
-          ad.angles[corr] = { points: pts, angle: a }; selAng = corr; corr = -1; tmpPts = []; statusMsg.textContent = '✅ 입력완료'; notify3D();
+          
+          // 🔻 기존 AI 데이터가 있다면 좌우 시선 방향(FR) 유지, 없으면 우측(true)으로 임시 간주
+          const k = ad.rawPose?.keypoints;
+          let FR = true;
+          if (k) {
+            const ls = ((k[5]?.score||0) + (k[7]?.score||0) + (k[11]?.score||0)) / 3;
+            const rs = ((k[6]?.score||0) + (k[8]?.score||0) + (k[12]?.score||0)) / 3;
+            FR = rs >= ls;
+          }
+
+          if (corr === 1) { // 허리(Trunk) 수동 입력
+            const sh = tmpPts[0], hip = tmpPts[1];
+            const d = Math.hypot(sh.x - hip.x, sh.y - hip.y) || 1;
+            pts = [{ x: hip.x, y: hip.y - d }, hip, sh];
+            a = ang3(pts[0], pts[1], pts[2]);
+            // 🔻 앞/뒤 굽힘 방향 판별 (외적 원리)
+            if (FR ? sh.x < hip.x : sh.x > hip.x) a = -a;
+          } else {
+            a = ang3(...tmpPts); 
+            if (INV.includes(corr)) a = 180 - a;
+            
+            if (corr === 0) { // 목(Neck) 수동 입력
+              const ear = pts[0], sh = pts[1], pRef = pts[2];
+              const tdx = pRef.x - sh.x, tdy = pRef.y - sh.y;
+              // 🔻 앞/뒤 굽힘 방향 판별
+              if (FR ? (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) < 0 : (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) > 0) a = -a;
+            }
+          }
+          
+          ad.angles[corr] = { points: pts, angle: a }; 
+          selAng = corr; corr = -1; tmpPts = []; 
+          statusMsg.textContent = '✅ 입력완료'; 
+          notify3D();
         }
         drawAll(); return;
       }
@@ -1796,10 +1826,11 @@
           FR = rs > ls;
         }
 
+        // 오른쪽 고관절 계산 로직 보완
         if (a[5] && a[5].points && a[5].points.length >= 2) {
           let ang = Math.atan2(a[5].points[1].x - a[5].points[0].x, a[5].points[1].y - a[5].points[0].y);
+          // 🔻 골반 기준선(trunkFlex)을 고려하여 다리 각도 보정
           let rotX = FR ? ang : -ang;
-          // 🔻 오른쪽 고관절(t, b)에 마이너스(-) 적용
           hipR.rotation.set(rotX - trunkFlex, -customRots.hipR.t * D, -customRots.hipR.b * D);
         } else if (k && k[12].score > .25 && k[14].score > .25) {
           let ang = Math.atan2(k[14].x - k[12].x, k[14].y - k[12].y);
@@ -1807,6 +1838,7 @@
           hipR.rotation.set(rotX - trunkFlex, -customRots.hipR.t * D, -customRots.hipR.b * D);
         }
 
+        // 왼쪽 고관절 계산 로직 보완
         if (a[9] && a[9].points && a[9].points.length >= 2) {
           let ang = Math.atan2(a[9].points[1].x - a[9].points[0].x, a[9].points[1].y - a[9].points[0].y);
           let rotX = FR ? ang : -ang;
