@@ -815,29 +815,34 @@
         // 🔻 허리(1)는 2점만 찍으면 완료, 나머지는 3점이 모였을 때 완료 처리
         if ((corr === 1 && tmpPts.length === 2) || tmpPts.length === 3) {
           let pts = [...tmpPts], a = 0;
-          let FR = getFR(ad); // 앞서 추가한 통합 방향 판별 함수 사용
-          
+          let FR = getFR(ad); // 통합 방향 판별 함수
+
           if (corr === 1) { 
-            // 허리(Trunk) 수동 입력: 어깨(0) -> 골반(1) 순서
-            const sh = pts[0], hip = pts[1];
+            // 🌟 허리(Trunk) 수동 입력: Y좌표 기반 자동 정렬 (클릭 순서 무관)
+            const sorted = [...pts].sort((A, B) => A.y - B.y);
+            const sh = sorted[0], hip = sorted[1];
             const d = Math.hypot(sh.x - hip.x, sh.y - hip.y) || 1;
             pts = [{ x: hip.x, y: hip.y - d }, hip, sh];
             a = ang3(pts[0], pts[1], pts[2]);
             if (FR ? sh.x < hip.x : sh.x > hip.x) a = -a;
+          } else if (corr === 0) {
+            // 🌟 목(Neck) 수동 입력: Y좌표 기반 자동 정렬 및 AI 기준점(pRef) 완벽 동기화
+            const sorted = [...pts].sort((A, B) => A.y - B.y);
+            const ear = sorted[0], sh = sorted[1], hip = sorted[2];
+            const dx = sh.x - hip.x, dy = sh.y - hip.y, len = Math.hypot(dx, dy) || 1;
+            // AI 로직과 동일하게 어깨에서 위로 뻗어나가는 가상 기준점 생성
+            const pRef = { x: sh.x + (dx / len) * (len * .5), y: sh.y + (dy / len) * (len * .5) };
+            pts = [ear, sh, pRef];
+            a = ang3(pts[0], pts[1], pts[2]);
+            if (FR ? (dx * (ear.y - sh.y) - dy * (ear.x - sh.x)) < 0 : (dx * (ear.y - sh.y) - dy * (ear.x - sh.x)) > 0) a = -a;
           } else {
-            a = ang3(...tmpPts); 
+            // 팔/다리 수동 입력
+            a = ang3(...pts); 
             if (INV.includes(corr)) a = 180 - a;
-            
-            if (corr === 0) { 
-              // 목(Neck) 수동 입력: 귀(0) -> 어깨(1) -> 골반(2) 순서
-              const ear = pts[0], sh = pts[1], pRef = pts[2];
-              const tdx = pRef.x - sh.x, tdy = pRef.y - sh.y;
-              if (FR ? (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) < 0 : (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) > 0) a = -a;
-            }
           }
           
           ad.angles[corr] = { points: pts, angle: a }; 
-          selAng = corr; corr = -1; tmpPts = []; 
+          selAng = corr; corr = -1; tmpPts = [];
           statusMsg.textContent = '✅ 입력완료'; 
           statusMsg.style.color = '#22c55e';
           notify3D();
