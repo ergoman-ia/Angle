@@ -1613,6 +1613,13 @@
         return pd.customRots;
       }
 
+      // ── [신규] 작업자별 바닥 지지 발 설정 반환(없으면 기본값 양발 생성) ──
+      function getFootSupport(pd) {
+        if (!pd) return { R: true, L: true };
+        if (!pd.footSupport) pd.footSupport = { R: true, L: true };
+        return pd.footSupport;
+      }
+
       pelMesh.userData = { id: 'bodyRoot' }; torsoMesh.userData = { id: 'torsoGrp' };
       nekMesh.userData = { id: 'nekPiv' }; hedMesh.userData = { id: 'nekPiv' };
       uAMeshR.userData = { id: 'shPivR' }; lAMeshR.userData = { id: 'lAMeshR' };
@@ -1626,17 +1633,18 @@
 
       let selPartId = null;
 
-      // ── [신규] 바닥 지지 기준 발 선택 상태 ──
-      let footSupport = { R: true, L: true };
+      // ── [신규] 바닥 지지 기준 발 선택 — 작업자별(pd.footSupport)로 저장/복원 ──
       const fsR = document.getElementById('footSupportR');
       const fsL = document.getElementById('footSupportL');
       if (fsR) fsR.addEventListener('change', () => {
-        footSupport.R = fsR.checked;
-        if (window._3DlastPD) do3D(window._3DlastPD);
+        if (!window._3DlastPD) return;
+        getFootSupport(window._3DlastPD).R = fsR.checked;
+        do3D(window._3DlastPD);
       });
       if (fsL) fsL.addEventListener('change', () => {
-        footSupport.L = fsL.checked;
-        if (window._3DlastPD) do3D(window._3DlastPD);
+        if (!window._3DlastPD) return;
+        getFootSupport(window._3DlastPD).L = fsL.checked;
+        do3D(window._3DlastPD);
       });
 
       // 슬라이더 이벤트 연결
@@ -1671,6 +1679,9 @@
         const td = document.getElementById('twistDisp');
         if (!pd) {
           [torsoGrp, nekPiv, bodyRoot, shPivR, shPivL, elPivR, elPivL, hipR, hipL, kneeR, kneeL].forEach(g => g.rotation.set(0, 0, 0));
+          bodyRoot.position.y = 0;
+          if (fsR) fsR.checked = true;
+          if (fsL) fsL.checked = true;
           if (td) td.textContent = '—'; mkTwistArc(0); return;
         }
 
@@ -1685,6 +1696,11 @@
           document.getElementById('s_csb').value = customRots[selPartId].b;
           document.getElementById('v_csb').textContent = customRots[selPartId].b + '°';
         }
+
+        // 👉 작업자 전환 시 바닥 지지 체크박스를 해당 작업자의 저장값으로 동기화
+        const fSup = getFootSupport(pd);
+        if (fsR) fsR.checked = fSup.R;
+        if (fsL) fsL.checked = fSup.L;
 
         // --- Keypoint-derived values ---
         let shTilt = 0, hipTilt = 0, twEst = 0, vFrac = .5;
@@ -1779,11 +1795,11 @@
         //    - 양발 선택 : 두 발 오프셋의 평균 (균형 잡힌 접지)
         //    - 한쪽만 선택 : 해당 발만 정확히 접지, 반대 발은 뜨거나 박힐 수 있음
         let groundOffset = 0;
-        if (footSupport.R && footSupport.L) {
+        if (fSup.R && fSup.L) {
           groundOffset = groundY - (bottomR + bottomL) / 2;
-        } else if (footSupport.R) {
+        } else if (fSup.R) {
           groundOffset = groundY - bottomR;
-        } else if (footSupport.L) {
+        } else if (fSup.L) {
           groundOffset = groundY - bottomL;
         }
         bodyRoot.position.y = groundOffset;
