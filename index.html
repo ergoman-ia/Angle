@@ -510,6 +510,18 @@
           <input type="checkbox" id="footSupportL" checked style="vertical-align:middle;margin-right:4px;">왼발
         </label>
         <div style="color:#6b7280;font-size:10px;margin-top:4px;">둘 다 선택 = 양발 지지 (평균) · 한쪽만 선택 = 해당 발만 고정</div>
+
+        <div style="margin-top:10px;padding-top:8px;border-top:1px dashed #ddd;">
+          <label style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;color:#444;margin-bottom:4px;">
+            ⚖️ 무게중심 (짝다리) <span id="v_wb" style="color:#9333ea;">중앙 50:50</span>
+          </label>
+          <input type="range" id="s_wb" min="-100" max="100" value="0" step="5"
+                 style="width:100%;accent-color:#9333ea;">
+          <div style="display:flex;justify-content:space-between;font-size:10px;color:#9ca3af;margin-top:2px;">
+            <span>◀ 왼발 쪽</span><span>오른발 쪽 ▶</span>
+          </div>
+          <div style="color:#6b7280;font-size:10px;margin-top:4px;">양발 지지일 때만 조절 가능 · 골반이 무게중심이 있는 발 쪽으로 이동</div>
+        </div>
       </div>
     </div>
 
@@ -1139,7 +1151,7 @@
         if (qs.empty) { alert('추출할 데이터가 없습니다.'); return; }
 
         let csv = '\uFEFF'; // UTF-8 BOM
-        // 2D 각도 13컬럼 + 3D 자동 3컬럼 + 수동 13부위×2(T/B) = 42컬럼
+        // 2D 각도 13컬럼 + 3D 자동 3컬럼 + 수동 13부위×2(T/B) + 지지발/무게중심 3컬럼 = 45컬럼
         csv += '현장명,저장일시,작업자,' +
           '목,허리,윗팔(좌),윗팔(우),아랫팔(좌),아랫팔(우),손목(좌),손목(우),다리(좌),다리(우),' +
           '자동_비틀림,자동_어깨기울기,자동_골반기울기,' +
@@ -1147,7 +1159,8 @@
           '윗팔우_T,윗팔우_B,아랫팔우_T,아랫팔우_B,손우_T,손우_B,' +
           '윗팔좌_T,윗팔좌_B,아랫팔좌_T,아랫팔좌_B,손좌_T,손좌_B,' +
           '허벅지우_T,허벅지우_B,종아리우_T,종아리우_B,' +
-          '허벅지좌_T,허벅지좌_B,종아리좌_T,종아리좌_B\n';
+          '허벅지좌_T,허벅지좌_B,종아리좌_T,종아리좌_B,' +
+          '지지발,무게중심_왼발%,무게중심_오른발%\n';
 
         // customRots 단일 값 추출 헬퍼
         const getCR = (crObj, key, field) => {
@@ -1169,6 +1182,20 @@
               return d.angle < 0 ? `${Math.abs(d.angle).toFixed(0)}(젖힘)` : `${d.angle.toFixed(0)}`;
             };
             const cr = p.customRots || null;
+
+            // ── 지지발 / 무게중심(짝다리) 계산 ──
+            const fSup = p.footSupport || { R: true, L: true };
+            const supportLabel = (fSup.R && fSup.L) ? '양발'
+                                : (fSup.R ? '오른발' : (fSup.L ? '왼발' : '-'));
+
+            const wb = p.weightBalance ?? 0;  // -100(왼발) ~ +100(오른발)
+            let effWB = 0;
+            if (fSup.R && fSup.L) effWB = wb;
+            else if (fSup.R) effWB = 100;
+            else if (fSup.L) effWB = -100;
+            const rightPct = Math.round((effWB + 100) / 2);
+            const leftPct = 100 - rightPct;
+
             csv += [
               site, time, `작업자 ${idx + 1}`,
               // 2D 각도
@@ -1190,7 +1217,9 @@
               getCR(cr,'hipR',    't'), getCR(cr,'hipR',    'b'),
               getCR(cr,'shMeshR', 't'), getCR(cr,'shMeshR', 'b'),
               getCR(cr,'hipL',    't'), getCR(cr,'hipL',    'b'),
-              getCR(cr,'shMeshL', 't'), getCR(cr,'shMeshL', 'b')
+              getCR(cr,'shMeshL', 't'), getCR(cr,'shMeshL', 'b'),
+              // 지지발 / 무게중심
+              supportLabel, leftPct, rightPct
             ].join(',') + '\n';
           });
         });
@@ -1544,30 +1573,31 @@
       let twistArc = null, shLine = null, hipLine = null, vertRef = null;
 
       function mkTwistArc(angle) {
-        if (twistArc) { scene.remove(twistArc); twistArc = null; }
+        if (twistArc) { bodyRoot.remove(twistArc); twistArc = null; }
         if (Math.abs(angle) < .02) return;
         const pts = [], r = .23;
         for (let i = 0; i <= 32; i++) { const t = (i / 32) * angle; pts.push(new THREE.Vector3(Math.sin(t) * r, 0, Math.cos(t) * r)); }
         const col = Math.abs(angle) > 35 * D ? 0xff2222 : Math.abs(angle) > 15 * D ? 0xff8800 : 0x9955ff;
         twistArc = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: col, linewidth: 2 }));
-        twistArc.position.set(0, B.pelH / 2 + .01, 0); scene.add(twistArc);
+        // [변경] scene → bodyRoot 자식으로: 몸이 좌우/상하로 이동해도 표시선이 함께 따라감
+        twistArc.position.set(0, B.pelH / 2 + .01, 0); bodyRoot.add(twistArc);
         const td = document.getElementById('twistDisp');
         if (td) { td.textContent = `${Math.abs(angle / D).toFixed(1)}°`; td.style.color = col === 0xff2222 ? '#ff4444' : col === 0xff8800 ? '#fb923c' : '#a78bfa'; }
       }
 
       function mkBalanceLines(sTilt, pTilt) {
-        if (shLine) { scene.remove(shLine); shLine = null; } if (hipLine) { scene.remove(hipLine); hipLine = null; }
+        if (shLine) { bodyRoot.remove(shLine); shLine = null; } if (hipLine) { bodyRoot.remove(hipLine); hipLine = null; }
         const shY = B.pelH / 2 + B.torH + .02, hw = B.torTopW / 2 + .07;
         const sc = Math.abs(sTilt) > 8 * D ? 0xfbbf24 : 0x1e3a5f;
-        shLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-hw * Math.cos(sTilt), shY + hw * Math.sin(sTilt), 0), new THREE.Vector3(hw * Math.cos(sTilt), shY - hw * Math.sin(sTilt), 0)]), new THREE.LineBasicMaterial({ color: sc, linewidth: 2 })); scene.add(shLine);
+        shLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-hw * Math.cos(sTilt), shY + hw * Math.sin(sTilt), 0), new THREE.Vector3(hw * Math.cos(sTilt), shY - hw * Math.sin(sTilt), 0)]), new THREE.LineBasicMaterial({ color: sc, linewidth: 2 })); bodyRoot.add(shLine);
         const phw = B.pelW / 2 + .05, pc = Math.abs(pTilt) > 5 * D ? 0xfbbf24 : 0x1e3a5f;
-        hipLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-phw * Math.cos(pTilt), phw * Math.sin(pTilt), 0), new THREE.Vector3(phw * Math.cos(pTilt), -phw * Math.sin(pTilt), 0)]), new THREE.LineBasicMaterial({ color: pc, linewidth: 2 })); scene.add(hipLine);
+        hipLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-phw * Math.cos(pTilt), phw * Math.sin(pTilt), 0), new THREE.Vector3(phw * Math.cos(pTilt), -phw * Math.sin(pTilt), 0)]), new THREE.LineBasicMaterial({ color: pc, linewidth: 2 })); bodyRoot.add(hipLine);
       }
 
       function mkVertRef() {
-        if (vertRef) { scene.remove(vertRef); vertRef = null; }
+        if (vertRef) { bodyRoot.remove(vertRef); vertRef = null; }
         const h = B.torH + B.pelH / 2;
-        vertRef = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, h, 0)]), new THREE.LineBasicMaterial({ color: 0x1e3a5f, linewidth: 1 })); scene.add(vertRef);
+        vertRef = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, h, 0)]), new THREE.LineBasicMaterial({ color: 0x1e3a5f, linewidth: 1 })); bodyRoot.add(vertRef);
       }
       mkVertRef();
 
@@ -1647,6 +1677,15 @@
         do3D(window._3DlastPD);
       });
 
+      // ── [신규] 무게중심(짝다리) 슬라이더 — 작업자별(pd.weightBalance)로 저장/복원 ──
+      const sWB = document.getElementById('s_wb');
+      const vWB = document.getElementById('v_wb');
+      if (sWB) sWB.addEventListener('input', (e) => {
+        if (!window._3DlastPD) return;
+        window._3DlastPD.weightBalance = parseFloat(e.target.value);
+        do3D(window._3DlastPD);
+      });
+
       // 슬라이더 이벤트 연결
       document.getElementById('s_ctw').addEventListener('input', (e) => {
         if (selPartId && window._3DlastPD) {
@@ -1679,9 +1718,11 @@
         const td = document.getElementById('twistDisp');
         if (!pd) {
           [torsoGrp, nekPiv, bodyRoot, shPivR, shPivL, elPivR, elPivL, hipR, hipL, kneeR, kneeL].forEach(g => g.rotation.set(0, 0, 0));
-          bodyRoot.position.y = 0;
+          bodyRoot.position.set(0, 0, 0);
           if (fsR) fsR.checked = true;
           if (fsL) fsL.checked = true;
+          if (sWB) { sWB.value = 0; sWB.disabled = false; }
+          if (vWB) { vWB.textContent = '중앙 50:50'; vWB.style.color = '#9333ea'; }
           if (td) td.textContent = '—'; mkTwistArc(0); return;
         }
 
@@ -1803,7 +1844,41 @@
           groundOffset = groundY - bottomL;
         }
         bodyRoot.position.y = groundOffset;
+
+        // ── [신규] 무게중심(짝다리) 좌우 이동 ──────────────────────
+        // - 양발 지지: 슬라이더 값(-100~100)에 비례해 골반을 좌/우로 이동
+        // - 한쪽 발만 지지: 무게중심은 그 발 쪽으로 100% (슬라이더 비활성화)
+        const wb = pd.weightBalance ?? 0;
+        let effWB = 0;
+        if (fSup.R && fSup.L) effWB = wb;
+        else if (fSup.R) effWB = 100;
+        else if (fSup.L) effWB = -100;
+
+        // 골반 중심선을 한쪽 다리(hip) 위치까지 이동시킬 수 있는 최대 폭
+        const wbRange = B.pelW * 0.38;
+        bodyRoot.position.x = (effWB / 100) * wbRange;
+
         bodyRoot.updateMatrixWorld(true);
+
+        // ── 무게중심 슬라이더 UI 동기화 ──
+        if (sWB && vWB) {
+          const bothFeet = fSup.R && fSup.L;
+          sWB.disabled = !bothFeet;
+          sWB.value = bothFeet ? wb : effWB;
+
+          const rightPct = Math.round((sWB.value * 1 + 100) / 2);
+          const leftPct = 100 - rightPct;
+          if (!bothFeet) {
+            vWB.textContent = fSup.R ? '오른발 100% (한발지지)' : (fSup.L ? '왼발 100% (한발지지)' : '—');
+            vWB.style.color = '#9ca3af';
+          } else if (Math.abs(wb) < 5) {
+            vWB.textContent = '중앙 50:50';
+            vWB.style.color = '#9333ea';
+          } else {
+            vWB.textContent = `왼발 ${leftPct}% / 오른발 ${rightPct}%`;
+            vWB.style.color = Math.abs(wb) >= 70 ? '#ef4444' : '#9333ea';
+          }
+        }
 
         // ── Update colors (risk level) ──
         torsoMesh.material.color.setHex(riskHex(a[1]?.angle, 'trunk'));
