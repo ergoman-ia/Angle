@@ -487,6 +487,7 @@
         <input type="file" id="fileInput" accept="image/*">
         <button class="btn btn-teal" id="addBtn">+ 영역 추가</button>
         <button class="btn btn-red" id="delBtn">- 현재 삭제</button>
+        <button class="btn btn-gray" id="flipBtn" title="작업자의 좌/우 시선 방향 반전">↔ 시선 반전</button>
         <span id="statusMsg">AI 초기화 중...</span>
       </div>
       <canvas id="canvas2d" width="880" height="580"></canvas>
@@ -694,13 +695,30 @@
       } catch (e) { console.error(e); }
     }
 
-    function mkPerson(raw) { const d = { rawPose: raw, angles: new Array(10).fill(null), isBilateral: { arms: false, legs: false } }; if (raw) calcAngles(d); return d; }
+    // 🔻 추가: 작업자의 시선 방향(오른쪽=true, 왼쪽=false)을 판별하는 통합 함수
+    function getFR(pd) {
+      if (pd.manualFR !== undefined) return pd.manualFR; // 수동으로 고정한 방향이 있으면 최우선
+      if (pd.rawPose?.keypoints) {
+        const k = pd.rawPose.keypoints;
+        const ls = ((k[5]?.score||0) + (k[7]?.score||0) + (k[11]?.score||0)) / 3;
+        const rs = ((k[6]?.score||0) + (k[8]?.score||0) + (k[12]?.score||0)) / 3;
+        return rs >= ls; // AI 신뢰도가 오른쪽이 높으면 true
+      }
+      return true; // 데이터가 아예 없으면 기본값 오른쪽
+    }
+
+    // 🔻 덮어쓰기: manualFR 속성 추가
+    function mkPerson(raw) { 
+      const d = { rawPose: raw, angles: new Array(10).fill(null), isBilateral: { arms: false, legs: false }, manualFR: undefined }; 
+      if (raw) calcAngles(d); 
+      return d; 
+    }
 
     function calcAngles(pd) {
       const k = pd.rawPose.keypoints, TH = 0.45;
       const bSh = k[5].score > TH && k[6].score > TH, bHip = k[11].score > TH && k[12].score > TH;
       pd.isBilateral = { arms: bSh, legs: bHip };
-      const ls = (k[5].score + k[7].score + k[11].score) / 3, rs = (k[6].score + k[8].score + k[12].score) / 3, FR = rs >= ls;
+      const FR = getFR(pd);
 
       // Neck (0)
       if (bSh && bHip) {
@@ -768,6 +786,23 @@
       pcountEl.textContent = `감지: ${window.PL.length}명`; selAng = -1; corr = -1; tmpPts = []; drawAll(); notify3D();
     };
 
+    // 🔻 추가: 시선 반전 버튼 클릭 이벤트
+    document.getElementById('flipBtn').onclick = function () {
+      if (window.AI === -1 || window.PL.length === 0) return;
+      const pd = window.PL[window.AI];
+      
+      // 현재 방향의 반대로 강제 고정
+      pd.manualFR = !getFR(pd); 
+      
+      // 시선이 반전되면 앞/뒤로 굽혔던 목과 허리의 부호도 물리적으로 뒤집어주어야 함
+      if (pd.angles[0]) pd.angles[0].angle = -pd.angles[0].angle;
+      if (pd.angles[1]) pd.angles[1].angle = -pd.angles[1].angle;
+      
+      statusMsg.textContent = `🔄 시선 방향: ${pd.manualFR ? '오른쪽' : '왼쪽'} (수동 고정)`; 
+      statusMsg.style.color = '#007BFF';
+      drawAll(); notify3D();
+    };
+
     c2.addEventListener('mousedown', e => {
       if (e.button === 2 && vZ > 1) { isPan = true; panS = { x: e.clientX, y: e.clientY }; return; }
       const { rx, ry, cx, cy } = getMouse(e);
@@ -781,12 +816,7 @@
           
           // 🔻 기존 AI 데이터가 있다면 좌우 시선 방향(FR) 유지, 없으면 우측(true)으로 임시 간주
           const k = ad.rawPose?.keypoints;
-          let FR = true;
-          if (k) {
-            const ls = ((k[5]?.score||0) + (k[7]?.score||0) + (k[11]?.score||0)) / 3;
-            const rs = ((k[6]?.score||0) + (k[8]?.score||0) + (k[12]?.score||0)) / 3;
-            FR = rs >= ls;
-          }
+          let FR = getFR(ad);
 
           if (corr === 1) { // 허리(Trunk) 수동 입력
             const sh = tmpPts[0], hip = tmpPts[1];
@@ -855,7 +885,7 @@
       data.points[dragPt.pi] = { x: rx, y: ry };
       if (dragPt.gi === 1) { if (dragPt.pi === 1) { data.points[0].x = data.points[1].x; data.points[0].y = data.points[1].y - 100; } else if (dragPt.pi === 0) { data.points[0].x = data.points[1].x; } }
       let na = ang3(data.points[0], data.points[1], data.points[2]);
-      const k = ad.rawPose?.keypoints; let FR = true; if (k) { const ls = (k[5].score + k[7].score + k[11].score) / 3, rs = (k[6].score + k[8].score + k[12].score) / 3; FR = rs > ls; }
+      let FR = getFR(ad);
       if (INV.includes(dragPt.gi)) na = 180 - na;
       if (dragPt.gi === 0) { const pRef = data.points[2], sh = data.points[1], ear = data.points[0], tdx = pRef.x - sh.x, tdy = pRef.y - sh.y; if (FR ? (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) < 0 : (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) > 0) na = -na; }
       if (dragPt.gi === 1) { const hip = data.points[1], sh = data.points[2]; if (FR ? sh.x < hip.x : sh.x > hip.x) na = -na; }
@@ -1819,12 +1849,7 @@
         wrPivL.rotation.set(+(a[8]?.angle ?? 0) * D, customRots.wrPivL.t * D, customRots.wrPivL.b * D);
 
         // 5. Legs (좌우 해부학적 대칭축 반전 적용)
-        let FR = true;
-        if (k) {
-          const ls = ((k[5]?.score || 0) + (k[7]?.score || 0) + (k[11]?.score || 0)) / 3;
-          const rs = ((k[6]?.score || 0) + (k[8]?.score || 0) + (k[12]?.score || 0)) / 3;
-          FR = rs > ls;
-        }
+        let FR = getFR(pd);
 
         // 오른쪽 고관절 계산 로직 보완
         if (a[5] && a[5].points && a[5].points.length >= 2) {
