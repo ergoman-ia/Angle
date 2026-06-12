@@ -811,28 +811,27 @@
       const ad = window.PL[window.AI];
       if (corr !== -1) {
         tmpPts.push({ x: rx, y: ry });
-        if (tmpPts.length === 3) {
+        
+        // 🔻 허리(1)는 2점만 찍으면 완료, 나머지는 3점이 모였을 때 완료 처리
+        if ((corr === 1 && tmpPts.length === 2) || tmpPts.length === 3) {
           let pts = [...tmpPts], a = 0;
+          let FR = getFR(ad); // 앞서 추가한 통합 방향 판별 함수 사용
           
-          // 🔻 기존 AI 데이터가 있다면 좌우 시선 방향(FR) 유지, 없으면 우측(true)으로 임시 간주
-          const k = ad.rawPose?.keypoints;
-          let FR = getFR(ad);
-
-          if (corr === 1) { // 허리(Trunk) 수동 입력
-            const sh = tmpPts[0], hip = tmpPts[1];
+          if (corr === 1) { 
+            // 허리(Trunk) 수동 입력: 어깨(0) -> 골반(1) 순서
+            const sh = pts[0], hip = pts[1];
             const d = Math.hypot(sh.x - hip.x, sh.y - hip.y) || 1;
             pts = [{ x: hip.x, y: hip.y - d }, hip, sh];
             a = ang3(pts[0], pts[1], pts[2]);
-            // 🔻 앞/뒤 굽힘 방향 판별 (외적 원리)
             if (FR ? sh.x < hip.x : sh.x > hip.x) a = -a;
           } else {
             a = ang3(...tmpPts); 
             if (INV.includes(corr)) a = 180 - a;
             
-            if (corr === 0) { // 목(Neck) 수동 입력
+            if (corr === 0) { 
+              // 목(Neck) 수동 입력: 귀(0) -> 어깨(1) -> 골반(2) 순서
               const ear = pts[0], sh = pts[1], pRef = pts[2];
               const tdx = pRef.x - sh.x, tdy = pRef.y - sh.y;
-              // 🔻 앞/뒤 굽힘 방향 판별
               if (FR ? (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) < 0 : (tdx * (ear.y - sh.y) - tdy * (ear.x - sh.x)) > 0) a = -a;
             }
           }
@@ -840,6 +839,7 @@
           ad.angles[corr] = { points: pts, angle: a }; 
           selAng = corr; corr = -1; tmpPts = []; 
           statusMsg.textContent = '✅ 입력완료'; 
+          statusMsg.style.color = '#22c55e';
           notify3D();
         }
         drawAll(); return;
@@ -904,8 +904,29 @@
       if (e.key === 'Delete' && selAng >= 0 && window.AI !== -1) { window.PL[window.AI].angles[selAng] = null; selAng = -1; drawAll(); notify3D(); }
     });
     window.tagClick = function (i) {
-      if (window.AI === -1) return; const ad = window.PL[window.AI];
-      if (ad.angles[i]) { selAng = i; corr = -1; tmpPts = []; } else { selAng = -1; corr = i; tmpPts = []; statusMsg.textContent = '📍 3점을 찍으세요'; }
+      if (window.AI === -1) return; 
+      const ad = window.PL[window.AI];
+      if (ad.angles[i]) { 
+        selAng = i; corr = -1; tmpPts = []; 
+      } else { 
+        selAng = -1; corr = i; tmpPts = []; 
+        
+        // 🔻 부위별 정확한 클릭 순서 가이드
+        const msgs = [
+          '📍 귀 ➔ 어깨 ➔ 등(골반) 순서로 찍으세요', // 0: 목
+          '📍 어깨 ➔ 골반 순서로 2점만 찍으세요',    // 1: 허리 (2점 최적화)
+          '📍 골반 ➔ 어깨 ➔ 팔꿈치 순서로 찍으세요', // 2: 윗팔(우)
+          '📍 어깨 ➔ 팔꿈치 ➔ 손목 순서로 찍으세요', // 3: 아랫팔(우)
+          '📍 팔꿈치 ➔ 손목 ➔ 손끝 순서로 찍으세요', // 4: 손목(우)
+          '📍 골반 ➔ 무릎 ➔ 발목 순서로 찍으세요',   // 5: 다리(우)
+          '📍 골반 ➔ 어깨 ➔ 팔꿈치 순서로 찍으세요', // 6: 윗팔(좌)
+          '📍 어깨 ➔ 팔꿈치 ➔ 손목 순서로 찍으세요', // 7: 아랫팔(좌)
+          '📍 팔꿈치 ➔ 손목 ➔ 손끝 순서로 찍으세요', // 8: 손목(좌)
+          '📍 골반 ➔ 무릎 ➔ 발목 순서로 찍으세요'    // 9: 다리(좌)
+        ];
+        statusMsg.textContent = msgs[i] || '📍 3점을 찍으세요'; 
+        statusMsg.style.color = '#e74c3c';
+      }
       drawAll();
     };
 
