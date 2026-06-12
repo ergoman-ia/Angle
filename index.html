@@ -75,7 +75,7 @@
       background-color: #eee;
       border: 1px solid #ccc;
       border-radius: 4px;
-      margin: 6px auto;
+      margin: 6px auto;    
     }
 
     #canvas3d {
@@ -504,6 +504,16 @@
       <div class="tbox">
         <div>몸통-골반 비틀림 추정: <span class="tval" id="twistDisp">—</span></div>
         <div style="color:#6b7280;font-size:11px;margin-top:2px;">어깨폭/골반폭 비율 기반 자동추정 | 🟣 호 = 비틀림 방향·크기</div>
+      </div>
+      <div class="tbox">
+        <div style="font-size:12px;font-weight:bold;color:#444;margin-bottom:6px;">🦶 바닥 지지 기준</div>
+        <label style="font-size:12px;margin-right:16px;cursor:pointer;">
+          <input type="checkbox" id="footSupportR" checked style="vertical-align:middle;margin-right:4px;">오른발
+        </label>
+        <label style="font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="footSupportL" checked style="vertical-align:middle;margin-right:4px;">왼발
+        </label>
+        <div style="color:#6b7280;font-size:10px;margin-top:4px;">둘 다 선택 = 양발 지지 (평균) · 한쪽만 선택 = 해당 발만 고정</div>
       </div>
     </div>
 
@@ -1461,6 +1471,16 @@
       const footGrpL = makeFoot('L');
       ankleGrpL.add(footGrpL);
 
+      // ── [신규] 발바닥 기준점 — 바닥 접지 보정 계산용 (보이지 않는 참조점) ──
+      // 발 본체 바닥(Y = -footH 부근)에 위치
+      const footBottomR = new THREE.Object3D();
+      footBottomR.position.set(0, -B.footH, 0);
+      footGrpR.add(footBottomR);
+
+      const footBottomL = new THREE.Object3D();
+      footBottomL.position.set(0, -B.footH, 0);
+      footGrpL.add(footBottomL);
+
       // Spine base — torsoGrp adds TWIST relative to pelvis
       const spineBase = new THREE.Group(); spineBase.position.y = B.pelH / 2; bodyRoot.add(spineBase);
       const torsoGrp = new THREE.Group(); spineBase.add(torsoGrp);
@@ -1610,6 +1630,19 @@
 
       let selPartId = null;
 
+      // ── [신규] 바닥 지지 기준 발 선택 상태 ──
+      let footSupport = { R: true, L: true };
+      const fsR = document.getElementById('footSupportR');
+      const fsL = document.getElementById('footSupportL');
+      if (fsR) fsR.addEventListener('change', () => {
+        footSupport.R = fsR.checked;
+        if (window._3DlastPD) do3D(window._3DlastPD);
+      });
+      if (fsL) fsL.addEventListener('change', () => {
+        footSupport.L = fsL.checked;
+        if (window._3DlastPD) do3D(window._3DlastPD);
+      });
+
       // 슬라이더 이벤트 연결
       document.getElementById('s_ctw').addEventListener('input', (e) => {
         if (selPartId && window._3DlastPD) {
@@ -1734,6 +1767,31 @@
         // 🔻 오른쪽 무릎(t, b)에 마이너스(-) 적용
         kneeR.rotation.set(-(a[5]?.angle ?? 0) * D, -customRots.shMeshR.t * D, -customRots.shMeshR.b * D);
         kneeL.rotation.set(-(a[9]?.angle ?? 0) * D, customRots.shMeshL.t * D, customRots.shMeshL.b * D);
+
+        // ── [신규] 바닥 지지 발 기준 높이 보정 ──────────────────────
+        // 1) 회전을 모두 적용한 상태에서 발바닥 월드 좌표를 계산
+        bodyRoot.position.y = 0;
+        bodyRoot.updateMatrixWorld(true);
+        const _fwp = new THREE.Vector3();
+        footBottomR.getWorldPosition(_fwp); const bottomR = _fwp.y;
+        footBottomL.getWorldPosition(_fwp); const bottomL = _fwp.y;
+
+        // 2) 그리드(바닥) 기준 발바닥 목표 높이
+        const groundY = grid.position.y + 0.02;
+
+        // 3) 선택된 발이 그리드에 닿도록 bodyRoot.y 보정
+        //    - 양발 선택 : 두 발 오프셋의 평균 (균형 잡힌 접지)
+        //    - 한쪽만 선택 : 해당 발만 정확히 접지, 반대 발은 뜨거나 박힐 수 있음
+        let groundOffset = 0;
+        if (footSupport.R && footSupport.L) {
+          groundOffset = groundY - (bottomR + bottomL) / 2;
+        } else if (footSupport.R) {
+          groundOffset = groundY - bottomR;
+        } else if (footSupport.L) {
+          groundOffset = groundY - bottomL;
+        }
+        bodyRoot.position.y = groundOffset;
+        bodyRoot.updateMatrixWorld(true);
 
         // ── Update colors (risk level) ──
         torsoMesh.material.color.setHex(riskHex(a[1]?.angle, 'trunk'));
