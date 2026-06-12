@@ -497,7 +497,7 @@
     <!-- ===== 3D Panel ===== -->
     <div class="panel panel-3d">
       <div class="toolbar" style="justify-content:space-between;">
-        <strong style="font-size:15px;">🧍 3D 바디 — 좌클릭:회전 / 휠:줌 / 우클릭:이동 / 더블클릭:초기화</strong>
+        <strong style="font-size:13px;">🧍 3D 바디 — 좌클릭:회전 / 휠:줌 / 우클릭:이동 / 더블클릭:초기화</strong>
         <div class="pbtns" id="pbtns"></div>
       </div>
       <canvas id="canvas3d" width="480" height="520"></canvas>      
@@ -1907,6 +1907,26 @@
           const h = '#' + riskHex(r.v, r.p).toString(16).padStart(6, '0');
           return `<div class="rrow"><span><span class="rdot" style="background:${h}"></span>${r.lb}</span><span style="color:${h};font-weight:700">${Math.abs(r.v).toFixed(1)}°${r.v < 0 ? ' ↩' : ''}</span></div>`;
         }).join('');
+
+        // ── [신규] 골반 불균형(짝다리) — 무게중심 편향도 표시 ──────────
+        {
+          const rPct = Math.round((effWB + 100) / 2);
+          const lPct = 100 - rPct;
+          const dev = Math.abs(effWB); // 0(균등) ~ 100(완전 편향)
+
+          let pelvCol;
+          if (dev <= 10) pelvCol = '#22bb66';       // 🟢 거의 균등
+          else if (dev <= 30) pelvCol = '#ffcc00';  // 🟡 경도 편향
+          else if (dev <= 60) pelvCol = '#ff8800';  // 🟠 중등도 편향
+          else pelvCol = '#ff2222';                 // 🔴 심한 편향/한발지지
+
+          let pelvText;
+          if (lPct === rPct) pelvText = '균등 50:50';
+          else if (lPct > rPct) pelvText = `왼쪽 ${lPct}%`;
+          else pelvText = `오른쪽 ${rPct}%`;
+
+          rp.innerHTML += `<div class="rrow"><span><span class="rdot" style="background:${pelvCol}"></span>골반 불균형(짝다리)</span><span style="color:${pelvCol};font-weight:700">${pelvText}</span></div>`;
+        }
 
         // ── [추가된 부분] 팔/다리를 뻗었을 때 캔버스 크기의 90% 수준으로 자동 줌(Zoom) 조정 ──
         if (pd) {
