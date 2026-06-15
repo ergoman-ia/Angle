@@ -478,8 +478,39 @@
 
 <body>
   <h1>3D 자세 분석 시스템 — AI 기반 2D→3D</h1>
-  <div class="main">
 
+   <!-- ===== 하단 행 : 갤러리 + DB 제어 패널 ===== -->
+  <div class="sub-row">
+
+    <!-- 갤러리 : 2D(900) + gap(20) + 3D(500) = 1420px -->
+    <div class="panel sub-gallery" id="galleryWrapper">
+      <div style="font-size:14px;font-weight:bold;color:#444;
+                  margin-bottom:12px;border-bottom:2px dashed #ccc;padding-bottom:8px;">
+        📂 저장된 작업 내역 (클릭하여 불러오기)
+      </div>
+      <div class="gallery-container" id="galleryContainer">
+        <p style="color:#666;font-size:13px;">데이터를 불러오는 중입니다...</p>
+      </div>
+    </div>
+
+    <!-- DB 제어 패널 : ctrl(280px) -->
+    <div class="panel sub-ctrl">
+      <div style="font-size:13px;font-weight:bold;color:#333;
+                  margin-bottom:10px;border-bottom:1px solid #ddd;padding-bottom:6px;">
+        💾 데이터 관리
+      </div>
+      <div class="db-btn-group">
+        <input type="text" id="siteName" placeholder="현장명 입력 (예: A구역)">
+        <button class="btn-save-db" id="saveDbBtn">클라우드(DB)에 저장</button>
+        <div class="btn-row-2">
+          <button class="btn-print" id="saveBtn">🖨 이미지 인쇄</button>
+          <button class="btn-csv" id="exportCsvBtn">📊 DB to CSV</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="main">
     <!-- ===== 2D Panel ===== -->
     <div class="panel panel-2d">
       <div class="toolbar">
@@ -550,38 +581,6 @@
         <span style="color:#ef4444;font-size:10px;">※ 단일카메라 2D 기반 추정값</span>
       </div>
     </div>
-  </div>
-
-  <!-- ===== 하단 행 : 갤러리 + DB 제어 패널 ===== -->
-  <div class="sub-row">
-
-    <!-- 갤러리 : 2D(900) + gap(20) + 3D(500) = 1420px -->
-    <div class="panel sub-gallery" id="galleryWrapper">
-      <div style="font-size:14px;font-weight:bold;color:#444;
-                  margin-bottom:12px;border-bottom:2px dashed #ccc;padding-bottom:8px;">
-        📂 저장된 작업 내역 (클릭하여 불러오기)
-      </div>
-      <div class="gallery-container" id="galleryContainer">
-        <p style="color:#666;font-size:13px;">데이터를 불러오는 중입니다...</p>
-      </div>
-    </div>
-
-    <!-- DB 제어 패널 : ctrl(280px) -->
-    <div class="panel sub-ctrl">
-      <div style="font-size:13px;font-weight:bold;color:#333;
-                  margin-bottom:10px;border-bottom:1px solid #ddd;padding-bottom:6px;">
-        💾 데이터 관리
-      </div>
-      <div class="db-btn-group">
-        <input type="text" id="siteName" placeholder="현장명 입력 (예: A구역)">
-        <button class="btn-save-db" id="saveDbBtn">클라우드(DB)에 저장</button>
-        <div class="btn-row-2">
-          <button class="btn-print" id="saveBtn">🖨 이미지 인쇄</button>
-          <button class="btn-csv" id="exportCsvBtn">📊 DB to CSV</button>
-        </div>
-      </div>
-    </div>
-
   </div>
 
   <!-- =====================================================================
