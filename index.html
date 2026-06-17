@@ -305,8 +305,8 @@
     #galleryWrapper {
       width: 100%;
       max-width: 1700px;
-      margin: 20px auto 0;
-      padding: 15px 20px;
+      margin: 0;                 /* 🔻 auto 좌우마진 제거: .sub-row 의 가운데 정렬이 적용되도록 */
+      padding: 6px 8px;          /* 🔻 내부 여유공간 최소화 */
       background: #fff;
       border-radius: 10px;
       box-shadow: 0 2px 5px rgba(0, 0, 0, .1);
@@ -340,6 +340,7 @@
       overflow-x: auto;
       overflow-y: hidden;
       scroll-behavior: smooth;
+      scroll-snap-type: x mandatory;   /* 🔻 카드(작업 단위) 단위로 정렬 정지 */
       padding: 2px 2px 6px;
       scrollbar-width: none;
       -ms-overflow-style: none;
@@ -390,6 +391,7 @@
     .thumb-card {
       position: relative;
       flex: 0 0 104px;          /* 🔻 기존 130px의 80% — 가로 캐러셀용 고정 폭 */
+      scroll-snap-align: start;  /* 🔻 카드 단위 스냅 */
       background: #fff;
       border: 1px solid #ddd;
       border-radius: 6px;
@@ -452,7 +454,7 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
-      margin-top: 10px;
+      margin-top: 4px;
     }
 
     .db-btn-group input[type=text] {
@@ -533,6 +535,7 @@
     .sub-ctrl {
       flex: 0 0 280px;
       min-width: 280px;
+      padding: 8px 10px;         /* 🔻 .panel(15px) 대비 내부 여유공간 최소화 */
     }
 
     /* ===== 🔻 그룹 박스 (배경색으로 컨테이너 묶기) =====
@@ -571,7 +574,7 @@
     <!-- 갤러리 : 2D(900) + gap(20) + 3D(500) = 1420px -->
     <div class="panel sub-gallery" id="galleryWrapper">
       <div style="font-size:14px;font-weight:bold;color:#444;
-                  margin-bottom:12px;border-bottom:2px dashed #ccc;padding-bottom:8px;">
+                  margin-bottom:6px;border-bottom:2px dashed #ccc;padding-bottom:5px;">
         📂 저장된 작업 내역 (클릭하여 불러오기)
       </div>
       <div class="gallery-viewport">
@@ -586,7 +589,7 @@
     <!-- DB 제어 패널 : ctrl(280px) -->
     <div class="panel sub-ctrl">
       <div style="font-size:13px;font-weight:bold;color:#333;
-                  margin-bottom:10px;border-bottom:1px solid #ddd;padding-bottom:6px;">
+                  margin-bottom:6px;border-bottom:1px solid #ddd;padding-bottom:5px;">
         💾 데이터 관리
       </div>
       <div class="db-btn-group">
@@ -2266,8 +2269,14 @@
       if (!vp || !aL || !aR) return;
 
       function scrollAmount() {
-        // 보이는 폭의 80% 또는 카드 약 3개(104+10px) 분량 중 큰 값
-        return Math.max(vp.clientWidth * 0.8, 114 * 3);
+        // 🔻 한 번에 '작업 단위(카드) 1개'씩만 이동
+        const card = vp.querySelector('.thumb-card');
+        const cs = getComputedStyle(vp);
+        const gap = parseFloat(cs.columnGap || cs.gap) || 10;
+        if (card) {
+          return card.getBoundingClientRect().width + gap;
+        }
+        return 104 + gap;   // 폴백: 카드 폭(104) + 간격
       }
       function updateArrows() {
         const maxScroll = vp.scrollWidth - vp.clientWidth - 1;
