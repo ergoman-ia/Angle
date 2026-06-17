@@ -325,13 +325,20 @@
     /* 🔻 유튜브식 가로 캐러셀 (좌우 화살표로 이동) */
     .gallery-viewport {
       position: relative;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
     }
 
     .gallery-container {
       display: flex;
       flex-wrap: nowrap;
       gap: 10px;
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
       overflow-x: auto;
+      overflow-y: hidden;
       scroll-behavior: smooth;
       padding: 2px 2px 6px;
       scrollbar-width: none;
@@ -518,6 +525,7 @@
     /* 2D(900) + gap(20) + 3D(500) */
     .sub-gallery {
       flex: 0 0 1420px;
+      min-width: 0;
       min-height: 140px;
     }
 
@@ -527,11 +535,13 @@
       min-width: 280px;
     }
 
-    /* ===== 🔻 그룹 박스 (배경색으로 컨테이너 묶기) ===== */
+    /* ===== 🔻 그룹 박스 (배경색으로 컨테이너 묶기) =====
+       ⚠ width 는 fit-content 가 아니라 '고정값'이어야 함.
+       fit-content(=shrink-to-fit) 면 내부 갤러리 스크롤 영역의 width:auto 가
+       카드 내용 전체 폭으로 계산되어 overflow-x 가 잘리지 못하고 옆으로 늘어남. */
     .group-box {
       box-sizing: border-box;
-      width: fit-content;
-      max-width: 100%;
+      width: 1830px;
       margin: 18px auto;
       padding: 14px 16px;
       border-radius: 16px;
