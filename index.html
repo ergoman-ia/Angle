@@ -759,7 +759,29 @@
       if (sd) sd.textContent = '클라우드(DB)에 저장';
     }
 
-    function calcScale() { imgScale = Math.min(8800 / img.width, 580 / img.height); imgOX = (880 - img.width * imgScale) / 2; imgOY = (580 - img.height * imgScale) / 2; }
+    function calcScale() { imgScale = Math.min(880 / img.width, 580 / img.height); imgOX = (880 - img.width * imgScale) / 2; imgOY = (580 - img.height * imgScale) / 2; }
+
+    // 🔻 [FIX] 저장된 좌표(원본 해상도 기준)를 현재 불러온 이미지 해상도에 맞게 비례 보정.
+    //  DB 저장 시 이미지가 1000px로 축소되면 좌표계가 어긋나므로, 불러올 때 스케일을 다시 맞춘다.
+    function rescalePoseCoords(personList, sx, sy) {
+      if (!Array.isArray(personList)) return;
+      personList.forEach(p => {
+        if (p && p.rawPose && Array.isArray(p.rawPose.keypoints)) {
+          p.rawPose.keypoints.forEach(kp => {
+            if (kp && typeof kp.x === 'number') { kp.x *= sx; kp.y *= sy; }
+          });
+        }
+        if (p && Array.isArray(p.angles)) {
+          p.angles.forEach(a => {
+            if (a && Array.isArray(a.points)) {
+              a.points.forEach(pt => {
+                if (pt && typeof pt.x === 'number') { pt.x *= sx; pt.y *= sy; }
+              });
+            }
+          });
+        }
+      });
+    }
 
     async function runDetect() {
       statusMsg.textContent = '🔍 AI 분석 중...'; statusMsg.style.color = '#f59e0b';
@@ -1356,7 +1378,10 @@
           siteName,
           personDataList: JSON.stringify(cleanPL),
           originalImageData: compOrig,
-          exportImageData: compExport
+          exportImageData: compExport,
+          // 🔻 [FIX] 좌표가 계산된 기준 이미지의 원본 해상도를 함께 저장 (불러오기 시 좌표 보정용)
+          imgW: img.naturalWidth || img.width,
+          imgH: img.naturalHeight || img.height
         };
         if (isUpdating) {
           payload.updatedAt = window.fsServerTimestamp();
@@ -1529,6 +1554,15 @@
 
         calcScale();
         window.PL = JSON.parse(data.personDataList);
+
+        // 🔻 [FIX] 저장 당시 기준 해상도(imgW/imgH)와 실제 불러온 이미지 해상도가 다르면 좌표 비례 보정
+        const refW = data.imgW || img.width;
+        const refH = data.imgH || img.height;
+        const sx = img.width / refW, sy = img.height / refH;
+        if (Math.abs(sx - 1) > 1e-4 || Math.abs(sy - 1) > 1e-4) {
+          rescalePoseCoords(window.PL, sx, sy);
+        }
+
         window.AI = window.PL.length > 0 ? 0 : -1;
         pcountEl.textContent = `감지: ${window.PL.length}명`;
         drawAll(); notify3D();
