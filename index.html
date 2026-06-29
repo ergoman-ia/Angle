@@ -226,12 +226,11 @@
     }
 
     #pcount {
-      font-family: var(--mono);
-      font-size: 11px; color: var(--ink-faint); margin-top: 8px; letter-spacing: -0.01em;
+      display: none;
     }
 
     /* ===== Angle chips ===== */
-    .angle-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; min-height: 26px; align-items: flex-start; }
+    .angle-tags { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; min-height: 26px; align-items: flex-start; }
     .atag-col {
       display: flex; flex-direction: column; gap: 6px;
       flex: 1 1 0; min-width: 110px;
@@ -1238,8 +1237,8 @@
       // 세 칸으로 분류: [목·허리] · [오른쪽 팔→다리] · [왼쪽 팔→다리]
       const columns = [
         { head: '몸통', idx: [0, 1] },
-        { head: '오른쪽', idx: [2, 3, 4, 5] },
         { head: '왼쪽', idx: [6, 7, 8, 9] },
+        { head: '오른쪽', idx: [2, 3, 4, 5] },
       ];
 
       const tagHTML = (i) => {
