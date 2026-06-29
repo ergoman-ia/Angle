@@ -72,6 +72,9 @@
     /* ===== Console header band ===== */
     .console-bar {
       width: 100%;
+      position: sticky;
+      top: 0;
+      z-index: 100;
       background: linear-gradient(180deg, var(--console-2) 0%, var(--console) 100%);
       border-bottom: 1px solid var(--console-line);
       box-shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 8px 24px -16px rgba(0, 0, 0, .6);
@@ -437,14 +440,14 @@
 
   <!-- ===== Firebase ===== -->
   <script type="module">
-    import { FIREBASE_CONFIG } from './secrets.js';
+    import { firebaseConfig } from './secrets.js';
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import {
       getFirestore, doc, setDoc, updateDoc, deleteDoc,
       collection, getDocs, serverTimestamp
     }
       from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
-    const app = initializeApp(FIREBASE_CONFIG);
+    const app = initializeApp(firebaseConfig);
     window.fbDb = getFirestore(app);
     window.fsDoc = doc;
     window.fsSetDoc = setDoc;
@@ -470,7 +473,7 @@
         </svg>
       </div>
       <div class="console-title">
-        <h1>3D 자세 분석 콘솔</h1>
+        <h1>3D 자세분석</h1>
         <div class="sub">AI 기반 <b>2D → 3D</b> 인간공학 자세 평가 · 비틀림 · 측방 굴곡 보정</div>
       </div>
       <div class="console-spacer"></div>
@@ -679,6 +682,18 @@
       sync();
     })();
 
+    // ── 분석 화면(2D·3D 컨테이너)을 고정 헤더 바로 아래로 자동 스크롤 ──
+    //   이미지를 선택/불러오면 위쪽 DB 리스트는 화면 밖으로 올리고
+    //   분석 화면이 제목 바로 아래에 보이도록 한다.
+    function scrollToAnalysis() {
+      const gb = document.querySelector('.group-bottom');
+      if (!gb) return;
+      const bar = document.querySelector('.console-bar');
+      const barH = bar ? bar.getBoundingClientRect().height : 0;
+      const y = gb.getBoundingClientRect().top + window.scrollY - barH - 8;
+      window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+    }
+
     document.getElementById('fileBtn').onclick = () => document.getElementById('fileInput').click();
     document.getElementById('fileInput').onchange = function (e) {
       if (!e.target.files.length) return;
@@ -689,6 +704,7 @@
           resetAll();
           originalImageDataUrl = ev.target.result;  // 원본 저장
           calcScale(); drawAll();
+          scrollToAnalysis();                        // 분석 화면으로 자동 이동
           if (detector) runDetect(); else setTimeout(() => { if (detector) runDetect(); }, 2500);
         };
         img.src = ev.target.result;
@@ -1631,7 +1647,7 @@
         drawAll(); notify3D();
         statusMsg.textContent = '불러오기 완료. 수정 가능합니다.';
         statusMsg.style.color = '#22c55e';
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollToAnalysis();
       };
       img.src = data.originalImageData;
     }
