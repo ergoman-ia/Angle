@@ -1300,7 +1300,7 @@
     (function () {
       const rp = document.getElementById('riskPanel');
       if (!rp) return;
-      const STEP = 1; // 1°씩 미세 조정 (좌: 감소 / 우: 증가)
+      const STEP = 0.1; // 1°씩 미세 조정 (좌: 감소 / 우: 증가)
 
       function nudge(ai, dir) {
         if (window.AI === -1) return;
