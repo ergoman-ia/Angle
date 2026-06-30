@@ -341,6 +341,16 @@
     .rrow .rlabel span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rrow .rval-ctrl { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: 8px; }
     .rrow .rval { font-family: var(--mono); font-weight: 700; font-size: 13px; min-width: 56px; text-align: right; }
+    .rrow .rval[data-ai] { cursor: text; border-radius: 4px; padding: 0 2px; }
+    .rrow .rval[data-ai]:hover { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--line-strong); }
+    .rval-edit {
+      font-family: var(--mono); font-weight: 700; font-size: 13px;
+      width: 56px; text-align: right; color: var(--ink); background: #fff;
+      border: 1px solid var(--accent); border-radius: 5px; padding: 1px 4px;
+      -moz-appearance: textfield; outline: none;
+    }
+    .rval-edit::-webkit-outer-spin-button,
+    .rval-edit::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     .nudge {
       font-family: var(--sans);
       width: 19px; height: 19px; padding: 0;
@@ -349,7 +359,7 @@
       background: var(--panel-soft); color: var(--ink-soft);
       font-size: 10px; line-height: 1; cursor: pointer; flex: 0 0 auto;
       transition: background .12s ease, color .12s ease, border-color .12s ease;
-      -webkit-user-select: none; user-select: none;
+      -webkit-user-select: none; user-select: none; touch-action: none;
     }
     .nudge:hover { background: var(--accent-wash); color: var(--accent); border-color: var(--accent); }
     .nudge:active { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -1293,33 +1303,107 @@
     function notify3D() { const d = window.AI !== -1 ? window.PL[window.AI] : null; if (window._3Dupdate) window._3Dupdate(d); else window._3Dpending = d; }
 
     /* =====================================================================
-       [추가] 위험도 패널 각도 미세 조정 (◀ / ▶, 1° 단위)
-       - 패널은 do3D() 호출 때마다 innerHTML이 재생성되므로 이벤트 위임으로 처리
+       [추가] 위험도 패널 각도 미세 조정
+       ① ◀ / ▶ 한 번 누름 = 0.1° 미세 조정
+       ② ◀ / ▶ 누르고 있으면 = 점점 빨라지는 자동 반복(0.1→0.3→1→3°)
+       ③ 숫자 클릭 = 값을 직접 입력 (큰 변화에 적합, 음수=젖힘)
+       - 패널은 do3D() 때마다 innerHTML이 재생성되므로 이벤트 위임 + window 레벨 종료로 처리
        - 캔버스 드래그와 동일하게 angles[ai].angle 값을 직접 변경 후 화면 갱신
     ===================================================================== */
     (function () {
       const rp = document.getElementById('riskPanel');
       if (!rp) return;
-      const STEP = 0.1; // 1°씩 미세 조정 (좌: 감소 / 우: 증가)
 
-      function nudge(ai, dir) {
+      const STEP = 0.1;                       // 기본 미세 스텝
+      const round1 = v => Math.round(v * 10) / 10;
+
+      function setAngle(ai, val) {
         if (window.AI === -1) return;
         const ad = window.PL[window.AI];
         if (!ad || !ad.angles || !ad.angles[ai]) return;
-        let v = (ad.angles[ai].angle || 0) + dir * STEP;
-        v = Math.max(-180, Math.min(180, v));        // 과도한 회전 방지
-        ad.angles[ai].angle = Math.round(v * 10) / 10; // 부동소수점 정리
-        notify3D();                                   // 3D 모델 + 위험도 패널 갱신
-        requestAnimationFrame(drawAll);               // 2D 캔버스 오버레이 갱신
+        const v = Math.max(-180, Math.min(180, val));   // 과도한 회전 방지
+        ad.angles[ai].angle = round1(v);
+        notify3D();                                      // 3D + 위험도 패널 갱신
+        requestAnimationFrame(drawAll);                  // 2D 캔버스 오버레이 갱신
+      }
+      function bump(ai, dir, step) {
+        if (window.AI === -1) return;
+        const ad = window.PL[window.AI];
+        if (!ad || !ad.angles || !ad.angles[ai]) return;
+        setAngle(ai, (ad.angles[ai].angle || 0) + dir * step);
       }
 
-      rp.addEventListener('click', function (e) {
+      // ── 누르고 있으면 점점 빨라지는 자동 반복 ──
+      let holdTO = null, holdIV = null, holdTick = 0, holdAi = 0, holdDir = 1;
+      function stopHold() {
+        if (holdTO) { clearTimeout(holdTO); holdTO = null; }
+        if (holdIV) { clearInterval(holdIV); holdIV = null; }
+      }
+      function holdStep() {
+        holdTick++;
+        let step = STEP;                       // 보유 시간이 길수록 가속
+        if (holdTick > 45) step = 3;
+        else if (holdTick > 25) step = 1;
+        else if (holdTick > 10) step = 0.3;
+        bump(holdAi, holdDir, step);
+      }
+      function startHold(ai, dir) {
+        stopHold();
+        holdAi = ai; holdDir = dir; holdTick = 0;
+        bump(ai, dir, STEP);                   // 즉시 한 스텝(짧게 누르면 0.1°만)
+        holdTO = setTimeout(() => { holdIV = setInterval(holdStep, 55); }, 300);
+      }
+      window.addEventListener('pointerup', stopHold);
+      window.addEventListener('pointercancel', stopHold);
+      window.addEventListener('blur', stopHold);
+
+      // ── 숫자 직접 입력 ──
+      function beginEdit(valSpan) {
+        if (window.AI === -1) return;
+        const ai = parseInt(valSpan.dataset.ai, 10);
+        if (Number.isNaN(ai)) return;
+        const ad = window.PL[window.AI];
+        if (!ad || !ad.angles || !ad.angles[ai]) return;
+        const cur = round1(ad.angles[ai].angle || 0);
+
+        const input = document.createElement('input');
+        input.type = 'number'; input.step = '0.1'; input.value = cur;
+        input.className = 'rval-edit'; input.setAttribute('inputmode', 'decimal');
+        valSpan.replaceWith(input);
+        input.focus(); input.select();
+
+        let done = false;
+        const commit = () => {
+          if (done) return; done = true;
+          const v = parseFloat(input.value);
+          if (!Number.isNaN(v)) setAngle(ai, v);   // notify3D → 패널 재생성(input 자동 제거)
+          else notify3D();                          // 잘못된 입력 → 원래 값으로 복원
+        };
+        const cancel = () => { if (done) return; done = true; notify3D(); };
+        input.addEventListener('keydown', ev => {
+          if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+          else if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+        });
+        input.addEventListener('blur', commit);
+      }
+
+      // ── 위임 처리: 버튼은 누름반복, 숫자는 입력 ──
+      rp.addEventListener('pointerdown', function (e) {
         const btn = e.target.closest('.nudge');
-        if (!btn) return;
-        const ai = parseInt(btn.dataset.ai, 10);
-        const dir = parseInt(btn.dataset.dir, 10);
-        if (Number.isNaN(ai) || Number.isNaN(dir)) return;
-        nudge(ai, dir);
+        if (btn) {
+          e.preventDefault();                  // 포커스/텍스트 선택 방지
+          const ai = parseInt(btn.dataset.ai, 10);
+          const dir = parseInt(btn.dataset.dir, 10);
+          if (Number.isNaN(ai) || Number.isNaN(dir)) return;
+          startHold(ai, dir);
+          return;
+        }
+        const valSpan = e.target.closest('.rval[data-ai]');
+        if (valSpan) { e.preventDefault(); beginEdit(valSpan); }
+      });
+      // 버튼 위에서 컨텍스트 메뉴(우클릭) 뜨지 않도록
+      rp.addEventListener('contextmenu', function (e) {
+        if (e.target.closest('.nudge')) e.preventDefault();
       });
     })();
 
@@ -2370,9 +2454,10 @@
         rp.innerHTML = rows.map(r => {
           if (r.v == null) return `<div class="rrow" style="color:#374151"><span class="rlabel">${r.lb}</span><span class="rval-ctrl"><span class="nudge-spacer"></span><span class="rval">—</span><span class="nudge-spacer"></span></span></div>`;
           const h = '#' + riskHex(r.v, r.p).toString(16).padStart(6, '0');
-          const valHtml = `<span class="rval" style="color:${h};font-weight:700">${Math.abs(r.v).toFixed(1)}°${r.v < 0 ? ' ↩' : ''}</span>`;
-          const ctrl = (r.ai != null)
-            ? `<span class="rval-ctrl"><button type="button" class="nudge" data-ai="${r.ai}" data-dir="-1" aria-label="${r.lb} 감소" title="-1°">◀</button>${valHtml}<button type="button" class="nudge" data-ai="${r.ai}" data-dir="1" aria-label="${r.lb} 증가" title="+1°">▶</button></span>`
+          const editable = (r.ai != null);
+          const valHtml = `<span class="rval"${editable ? ` data-ai="${r.ai}" title="클릭하여 값 직접 입력 (음수=젖힘)"` : ''} style="color:${h};font-weight:700">${Math.abs(r.v).toFixed(1)}°${r.v < 0 ? ' ↩' : ''}</span>`;
+          const ctrl = editable
+            ? `<span class="rval-ctrl"><button type="button" class="nudge" data-ai="${r.ai}" data-dir="-1" aria-label="${r.lb} 감소" title="누르고 있으면 빠르게 감소">◀</button>${valHtml}<button type="button" class="nudge" data-ai="${r.ai}" data-dir="1" aria-label="${r.lb} 증가" title="누르고 있으면 빠르게 증가">▶</button></span>`
             : `<span class="rval-ctrl"><span class="nudge-spacer"></span>${valHtml}<span class="nudge-spacer"></span></span>`;
           return `<div class="rrow"><span class="rlabel"><span class="rdot" style="background:${h}"></span><span>${r.lb}</span></span>${ctrl}</div>`;
         }).join('');
