@@ -335,6 +335,26 @@
     .rrow .val { font-family: var(--mono); font-weight: 700; font-size: 13px; }
     .rdot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 0 2px rgba(0,0,0,.03); }
 
+    /* 위험도 행 — 라벨(좌) / 값+미세조정버튼(우). 패널 폭은 고정이므로 행 폭은 더 늘어나지 않고
+       기존의 빈 가운데 여백 안에서 버튼이 배치된다. */
+    .rrow .rlabel { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+    .rrow .rlabel span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rrow .rval-ctrl { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; margin-left: 8px; }
+    .rrow .rval { font-family: var(--mono); font-weight: 700; font-size: 13px; min-width: 56px; text-align: right; }
+    .nudge {
+      font-family: var(--sans);
+      width: 19px; height: 19px; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid var(--line-strong); border-radius: 5px;
+      background: var(--panel-soft); color: var(--ink-soft);
+      font-size: 10px; line-height: 1; cursor: pointer; flex: 0 0 auto;
+      transition: background .12s ease, color .12s ease, border-color .12s ease;
+      -webkit-user-select: none; user-select: none;
+    }
+    .nudge:hover { background: var(--accent-wash); color: var(--accent); border-color: var(--accent); }
+    .nudge:active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .nudge-spacer { width: 19px; height: 19px; flex: 0 0 auto; }
+
     /* ===== Legend ===== */
     .legend {
       background: var(--panel-inset); border: 1px solid var(--line);
@@ -1273,6 +1293,37 @@
     function notify3D() { const d = window.AI !== -1 ? window.PL[window.AI] : null; if (window._3Dupdate) window._3Dupdate(d); else window._3Dpending = d; }
 
     /* =====================================================================
+       [추가] 위험도 패널 각도 미세 조정 (◀ / ▶, 1° 단위)
+       - 패널은 do3D() 호출 때마다 innerHTML이 재생성되므로 이벤트 위임으로 처리
+       - 캔버스 드래그와 동일하게 angles[ai].angle 값을 직접 변경 후 화면 갱신
+    ===================================================================== */
+    (function () {
+      const rp = document.getElementById('riskPanel');
+      if (!rp) return;
+      const STEP = 1; // 1°씩 미세 조정 (좌: 감소 / 우: 증가)
+
+      function nudge(ai, dir) {
+        if (window.AI === -1) return;
+        const ad = window.PL[window.AI];
+        if (!ad || !ad.angles || !ad.angles[ai]) return;
+        let v = (ad.angles[ai].angle || 0) + dir * STEP;
+        v = Math.max(-180, Math.min(180, v));        // 과도한 회전 방지
+        ad.angles[ai].angle = Math.round(v * 10) / 10; // 부동소수점 정리
+        notify3D();                                   // 3D 모델 + 위험도 패널 갱신
+        requestAnimationFrame(drawAll);               // 2D 캔버스 오버레이 갱신
+      }
+
+      rp.addEventListener('click', function (e) {
+        const btn = e.target.closest('.nudge');
+        if (!btn) return;
+        const ai = parseInt(btn.dataset.ai, 10);
+        const dir = parseInt(btn.dataset.dir, 10);
+        if (Number.isNaN(ai) || Number.isNaN(dir)) return;
+        nudge(ai, dir);
+      });
+    })();
+
+    /* =====================================================================
        인쇄 (이미지 저장)
     ===================================================================== */
     document.getElementById('saveBtn').addEventListener('click', function () {
@@ -2036,8 +2087,8 @@
         nekPiv: { t: [-80, 80], b: [-45, 45] },     // 목 (경추)
         shPivR: { t: [-90, 70], b: [-180, 50] },   // 우측 어깨 (내외전, 외전/신전)
         shPivL: { t: [-90, 70], b: [-180, 50] },   // 좌측 어깨
-        lAMeshR: { t: [-160, 0], b: [-1, 0] },   // 우측 팔꿈치 (회내/회외, 굴곡)
-        lAMeshL: { t: [-160, 0], b: [-1, 0] },   // 좌측 팔꿈치
+        lAMeshR: { t: [-160, 0], b: [0, 1] },   // 우측 팔꿈치 (회내/회외, 굴곡)
+        lAMeshL: { t: [-160, 0], b: [0, 1] },   // 좌측 팔꿈치
         wrPivR: { t: [-10, 10], b: [-30, 20] },     // 우측 손목 (요굴/척굴, 굴곡/신전)
         wrPivL: { t: [-10, 10], b: [-30, 20] },     // 좌측 손목
         hipR: { t: [-45, 40], b: [-45, 30] },     // 우측 고관절 (허벅지)
@@ -2309,17 +2360,21 @@
 
         // ── Risk detail panel ──
         const rows = [
-          { lb: '목 굽힘', v: a[0]?.angle, p: 'neck' }, { lb: '허리 굽힘', v: a[1]?.angle, p: 'trunk' },
-          { lb: '윗팔(우)', v: rUA, p: 'uArm' }, { lb: '아랫팔(우)', v: rLA, p: 'lArm' },
-          { lb: '윗팔(좌)', v: lUA, p: 'uArm' }, { lb: '아랫팔(좌)', v: lLA, p: 'lArm' },
-          { lb: '다리(우)', v: a[5]?.angle, p: 'leg' }, { lb: '다리(좌)', v: a[9]?.angle, p: 'leg' },
+          { lb: '목 굽힘', v: a[0]?.angle, p: 'neck', ai: 0 }, { lb: '허리 굽힘', v: a[1]?.angle, p: 'trunk', ai: 1 },
+          { lb: '윗팔(우)', v: rUA, p: 'uArm', ai: 2 }, { lb: '아랫팔(우)', v: rLA, p: 'lArm', ai: 3 },
+          { lb: '윗팔(좌)', v: lUA, p: 'uArm', ai: 6 }, { lb: '아랫팔(좌)', v: lLA, p: 'lArm', ai: 7 },
+          { lb: '다리(우)', v: a[5]?.angle, p: 'leg', ai: 5 }, { lb: '다리(좌)', v: a[9]?.angle, p: 'leg', ai: 9 },
           { lb: '어깨불균형 *', v: shTilt / D, p: 'trunk' }, { lb: '몸통비틀림 *', v: totalTwist / D, p: 'trunk' },
         ];
         const rp = document.getElementById('riskPanel'); if (!rp) return;
         rp.innerHTML = rows.map(r => {
-          if (r.v == null) return `<div class="rrow" style="color:#374151"><span>${r.lb}</span><span>—</span></div>`;
+          if (r.v == null) return `<div class="rrow" style="color:#374151"><span class="rlabel">${r.lb}</span><span class="rval-ctrl"><span class="nudge-spacer"></span><span class="rval">—</span><span class="nudge-spacer"></span></span></div>`;
           const h = '#' + riskHex(r.v, r.p).toString(16).padStart(6, '0');
-          return `<div class="rrow"><span><span class="rdot" style="background:${h}"></span>${r.lb}</span><span style="color:${h};font-weight:700">${Math.abs(r.v).toFixed(1)}°${r.v < 0 ? ' ↩' : ''}</span></div>`;
+          const valHtml = `<span class="rval" style="color:${h};font-weight:700">${Math.abs(r.v).toFixed(1)}°${r.v < 0 ? ' ↩' : ''}</span>`;
+          const ctrl = (r.ai != null)
+            ? `<span class="rval-ctrl"><button type="button" class="nudge" data-ai="${r.ai}" data-dir="-1" aria-label="${r.lb} 감소" title="-1°">◀</button>${valHtml}<button type="button" class="nudge" data-ai="${r.ai}" data-dir="1" aria-label="${r.lb} 증가" title="+1°">▶</button></span>`
+            : `<span class="rval-ctrl"><span class="nudge-spacer"></span>${valHtml}<span class="nudge-spacer"></span></span>`;
+          return `<div class="rrow"><span class="rlabel"><span class="rdot" style="background:${h}"></span><span>${r.lb}</span></span>${ctrl}</div>`;
         }).join('');
 
         // ── [신규] 골반 불균형(짝다리) — 무게중심 편향도 표시 ──────────
@@ -2339,7 +2394,7 @@
           else if (lPct > rPct) pelvText = `왼쪽 ${lPct}%`;
           else pelvText = `오른쪽 ${rPct}%`;
 
-          rp.innerHTML += `<div class="rrow"><span><span class="rdot" style="background:${pelvCol}"></span>골반 불균형(짝다리)</span><span style="color:${pelvCol};font-weight:700">${pelvText}</span></div>`;
+          rp.innerHTML += `<div class="rrow"><span class="rlabel"><span class="rdot" style="background:${pelvCol}"></span><span>골반 불균형(짝다리)</span></span><span class="rval-ctrl"><span class="nudge-spacer"></span><span class="rval" style="color:${pelvCol};font-weight:700">${pelvText}</span><span class="nudge-spacer"></span></span></div>`;
         }
 
         // ── [추가된 부분] 팔/다리를 뻗었을 때 캔버스 크기의 90% 수준으로 자동 줌(Zoom) 조정 ──
