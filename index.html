@@ -2445,8 +2445,8 @@
         // ── Risk detail panel ──
         const rows = [
           { lb: '목 굽힘', v: a[0]?.angle, p: 'neck', ai: 0 }, { lb: '허리 굽힘', v: a[1]?.angle, p: 'trunk', ai: 1 },
-          { lb: '윗팔(우)', v: rUA, p: 'uArm', ai: 2 }, { lb: '아랫팔(우)', v: rLA, p: 'lArm', ai: 3 }, { lb: '손목(우)', v: a[4]?.angle, p: 'wrist', ai: 4 },
-          { lb: '윗팔(좌)', v: lUA, p: 'uArm', ai: 6 }, { lb: '아랫팔(좌)', v: lLA, p: 'lArm', ai: 7 }, { lb: '손목(좌)', v: a[8]?.angle, p: 'wrist', ai: 8 },
+          { lb: '윗팔(우)', v: a[2]?.angle, p: 'uArm', ai: 2 }, { lb: '아랫팔(우)', v: a[3]?.angle, p: 'lArm', ai: 3 }, { lb: '손목(우)', v: a[4]?.angle, p: 'wrist', ai: 4 },
+          { lb: '윗팔(좌)', v: a[6]?.angle, p: 'uArm', ai: 6 }, { lb: '아랫팔(좌)', v: a[7]?.angle, p: 'lArm', ai: 7 }, { lb: '손목(좌)', v: a[8]?.angle, p: 'wrist', ai: 8 },
           { lb: '다리(우)', v: a[5]?.angle, p: 'leg', ai: 5 }, { lb: '다리(좌)', v: a[9]?.angle, p: 'leg', ai: 9 },
           { lb: '어깨불균형 *', v: shTilt / D, p: 'trunk' }, { lb: '몸통비틀림 *', v: totalTwist / D, p: 'trunk' },
         ];
