@@ -856,9 +856,10 @@
       return ks.length ? ks.reduce((s, kp) => s + kp.score, 0) / ks.length : 0;
     }
 
-    // ── [개선-핵심] 2단계 정밀화: MultiPose(빠른 탐색) 결과를 인물별 원본 해상도 crop 으로 잘라
-    //    SinglePose Thunder(고정밀)로 재추정 → 특히 화면 속 작은 인물의 관절 좌표 정확도가 크게 상승.
-    //    재추정 신뢰도가 기존보다 낮으면 원본 결과를 유지해 안전성 확보.
+    // ── [수정] 2단계 정밀화 — '통째 교체'가 아닌 '관절별 병합' 방식.
+    //    MultiPose 결과와 Thunder 재추정 결과를 17개 관절 각각에서 신뢰도 높은 쪽으로 채택.
+    //    관절 개수가 절대 줄어들 수 없으므로 저해상도·부분신체에서 원본 대비 후퇴가 불가능하고,
+    //    잘 보이는 관절은 Thunder의 더 정밀한 좌표를 얻는다.
     async function refinePose(pose) {
       if (!detectorSingle) return pose;
       const ks = pose.keypoints.filter(kp => kp.score > 0.2);
@@ -870,15 +871,22 @@
       x1 = Math.min(img.width, x1 + padX); y1 = Math.min(img.height, y1 + padY);
       const w = x1 - x0, h = y1 - y0;
       if (w < 24 || h < 24) return pose;
-      const cs = Math.min(1, 512 / Math.max(w, h));   // Thunder 입력에 충분한 512px 상한
+      // [수정] 저해상도 대응: 큰 crop은 512px로 축소, 작은 crop(작게 찍힌 사람)은 최대 2배까지 확대
+      const cs = Math.max(Math.min(1, 512 / Math.max(w, h)), Math.min(2, 256 / Math.max(w, h)));
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round(w * cs)); cv.height = Math.max(1, Math.round(h * cs));
-      cv.getContext('2d').drawImage(img, x0, y0, w, h, 0, 0, cv.width, cv.height);
+      const cctx = cv.getContext('2d');
+      cctx.imageSmoothingEnabled = true; cctx.imageSmoothingQuality = 'high';
+      cctx.drawImage(img, x0, y0, w, h, 0, 0, cv.width, cv.height);
       try {
         const rp = await detectorSingle.estimatePoses(cv, { maxPoses: 1 });
-        if (rp.length && poseScore(rp[0]) >= poseScore(pose) - 0.03) {
+        if (rp.length) {
           rp[0].keypoints.forEach(kp => { kp.x = kp.x / cs + x0; kp.y = kp.y / cs + y0; });
-          return rp[0];
+          const merged = pose.keypoints.map((ok, i) => {
+            const nk = rp[0].keypoints[i];
+            return (nk && nk.score > ok.score) ? nk : ok;   // 관절별로 더 확실한 쪽 채택
+          });
+          return Object.assign({}, pose, { keypoints: merged });
         }
       } catch (e) { console.warn('[AI] 정밀화 실패 — 1차 결과 사용', e); }
       return pose;
@@ -892,10 +900,12 @@
         const { src, scale } = getDetectSource();
         let poses = await detector.estimatePoses(src, { maxPoses: 6, flipHorizontal: false });
         if (scale !== 1) poses.forEach(p => p.keypoints.forEach(kp => { kp.x /= scale; kp.y /= scale; }));
-        poses = poses.filter(p => poseScore(p) > 0.22);              // [개선] 저신뢰 유령 감지 제거
-        poses = await Promise.all(poses.map(p => refinePose(p)));    // [개선] Thunder 2단계 정밀화
+        poses = await Promise.all(poses.map(p => refinePose(p)));    // [수정] 관절별 병합 정밀화 (관절 손실 불가)
         const ms = performance.now() - t0;
         window.PL = poses.map(p => mkPerson(p));
+        // [수정] 사전 신뢰도 필터 제거 — 저해상도의 실제 인물까지 걸러내던 회귀 원인.
+        //        대신 '각도가 하나도 계산되지 않은' 완전 무효 감지만 제외 (원본 대비 인원 손실 불가능).
+        window.PL = window.PL.filter(p => p.angles.some(a => a));
         window.PL.sort((a, b) => getCX(a) - getCX(b));
         window.AI = window.PL.length > 0 ? 0 : -1;
         pcountEl.textContent = `감지: ${window.PL.length}명`;
@@ -913,14 +923,47 @@
       const rx = ((rect.x - vPX) / vZ - imgOX) / imgScale, ry = ((rect.y - vPY) / vZ - imgOY) / imgScale;
       const rw = Math.min(img.width - rx, rect.w / (imgScale * vZ)), rh = Math.min(img.height - ry, rect.h / (imgScale * vZ));
       if (rw <= 0 || rh <= 0) return;
-      const oc = document.createElement('canvas'); oc.width = rw; oc.height = rh;
-      oc.getContext('2d').drawImage(img, rx, ry, rw, rh, 0, 0, rw, rh);
+      // [수정] 저해상도 대응: 작은 영역은 최대 2배(기준 320px)까지 확대해 감지 정확도 확보
+      const up = Math.min(2, Math.max(1, 320 / Math.max(rw, rh)));
+      const oc = document.createElement('canvas');
+      oc.width = Math.max(1, Math.round(rw * up)); oc.height = Math.max(1, Math.round(rh * up));
+      const octx = oc.getContext('2d');
+      octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
+      octx.drawImage(img, rx, ry, rw, rh, 0, 0, oc.width, oc.height);
       try {
-        const det = detectorSingle || detector;   // [개선] 영역 지정은 고정밀 Thunder 모델 우선
-        const poses = await det.estimatePoses(oc, { maxPoses: 1 });
-        let np; const recognized = poses.length > 0;
-        if (recognized) { poses[0].keypoints.forEach(k => { k.x += rx; k.y += ry; }); np = mkPerson(poses[0]); }
-        else np = mkPerson(null);
+        // [수정] Thunder 단독 사용 회귀 원복 — Thunder(전신 가정)와 MultiPose(부분신체에 강함)를
+        //        둘 다 실행해 17개 관절 각각을 신뢰도 높은 쪽으로 병합.
+        //        SinglePose는 '항상' 포즈 1개를 반환(저품질 포함)하므로, 인식 성공 여부는
+        //        포즈 존재가 아닌 '유효 관절 수(신뢰도 0.25 초과 3개 이상)'로 판정한다.
+        const cands = [];
+        try {
+          const r = await detector.estimatePoses(oc, { maxPoses: 1 });
+          if (r.length) cands.push(r[0]);
+        } catch (e) { }
+        try {
+          if (detectorSingle) {
+            const r = await detectorSingle.estimatePoses(oc, { maxPoses: 1 });
+            if (r.length) cands.push(r[0]);
+          }
+        } catch (e) { }
+        let best = cands[0] || null;
+        if (cands.length === 2) {
+          best = Object.assign({}, cands[0], {
+            keypoints: cands[0].keypoints.map((ok, i) => {
+              const nk = cands[1].keypoints[i];
+              return (nk && nk.score > ok.score) ? nk : ok;
+            })
+          });
+        }
+        // 인식 성공 판정: 관절 신뢰도 같은 대리 지표가 아니라 '각도가 실제로 1개 이상 계산되었는가'로 판정.
+        // 병합 결과의 관절 커버리지는 MultiPose 단독(=원본 방식) 이상이므로 원본보다 나빠질 수 없다.
+        let np = null, recognized = false;
+        if (best) {
+          best.keypoints.forEach(k => { k.x = k.x / up + rx; k.y = k.y / up + ry; });
+          const cand = mkPerson(best);
+          if (cand.angles.some(a => a)) { np = cand; recognized = true; }
+        }
+        if (!np) np = mkPerson(null);
         window.PL.push(np); window.PL.sort((a, b) => getCX(a) - getCX(b));
         window.AI = window.PL.indexOf(np); pcountEl.textContent = `감지: ${window.PL.length}명`;
         // ▶ 영역 추가로 인식된 작업자를 '완료' 인원에 반영
