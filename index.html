@@ -482,23 +482,43 @@
 
 
   <!-- ===== Firebase ===== -->
+  <!-- [개선3] file:// 직접 실행 대비 이중 모드:
+       (1) 권장: 로컬 서버(http)로 실행 → 아래 모듈이 secrets.js를 정상 import
+       (2) 차선: secrets.js를 `window.FIREBASE_CONFIG = {...};` 형태로 바꾸면
+           아래 일반 스크립트가 file://에서도 읽어들임 (export 문법이면 이 태그는 무해한 콘솔 오류만 남김) -->
+  <script src="./secrets.js"></script>
   <script type="module">
-    import { FIREBASE_CONFIG } from './secrets.js';
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import {
-      getFirestore, doc, setDoc, updateDoc, deleteDoc,
+      getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
       collection, getDocs, serverTimestamp
     }
       from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
-    const app = initializeApp(FIREBASE_CONFIG);
-    window.fbDb = getFirestore(app);
-    window.fsDoc = doc;
-    window.fsSetDoc = setDoc;
-    window.fsUpdateDoc = updateDoc;
-    window.fsDeleteDoc = deleteDoc;
-    window.fsCollection = collection;
-    window.fsGetDocs = getDocs;
-    window.fsServerTimestamp = serverTimestamp;
+
+    // [개선3] 설정 획득: window 방식 우선, 없으면 모듈 import 시도.
+    //   둘 다 실패해도 페이지 전체가 죽지 않고 'DB 기능만 비활성' 상태로 동작한다.
+    let cfg = window.FIREBASE_CONFIG || null;
+    if (!cfg) {
+      try { cfg = (await import('./secrets.js')).FIREBASE_CONFIG; }
+      catch (e) {
+        console.warn('[Firebase] secrets.js import 실패 — file://로 직접 열었다면 로컬 서버로 실행하거나 ' +
+          'secrets.js를 window.FIREBASE_CONFIG = {...} 방식으로 바꾸세요.', e);
+      }
+    }
+    if (cfg) {
+      try {
+        const app = initializeApp(cfg);
+        window.fbDb = getFirestore(app);
+        window.fsDoc = doc;
+        window.fsGetDoc = getDoc;   // [개선2] 갤러리 카드 클릭 시 해당 세션 1건만 조회 (메모리 상주 제거용)
+        window.fsSetDoc = setDoc;
+        window.fsUpdateDoc = updateDoc;
+        window.fsDeleteDoc = deleteDoc;
+        window.fsCollection = collection;
+        window.fsGetDocs = getDocs;
+        window.fsServerTimestamp = serverTimestamp;
+      } catch (e) { console.error('[Firebase] 초기화 실패 — DB 기능 없이 동작합니다.', e); }
+    }
   </script>
 
 
@@ -563,7 +583,7 @@
           <!-- 2D panel -->
           <div class="panel panel-2d">
             <div class="toolbar">
-              <button class="btn btn-blue" id="fileBtn">이미지 선택</button>
+              <button class="btn btn-blue" id="fileBtn" disabled>AI 준비 중...</button>
               <input type="file" id="fileInput" accept="image/*">
               <button class="btn btn-teal" id="addBtn">+ 영역 추가</button>
               <button class="btn btn-red" id="delBtn">현재 삭제</button>
@@ -684,32 +704,214 @@
     const INV = [4, 5, 8, 9];
 
     let detectorSingle = null;   // [개선] 고정밀 SinglePose Thunder — 인물별/ROI 재추정 전용
+    let detectorROI = null;      // [개선7-핵심] ROI(영역 추가) 전용 MultiPose 256 감지기.
+    //   전체 이미지용 512 감지기를 ROI에 재사용한 것이 인식률 후퇴의 원인이었다:
+    //   512는 '넓은 사진 속 작은 사람'에 유리하지만, ROI처럼 사람이 프레임을 꽉 채우는 입력에서는
+    //   학습된 인물 크기 범위를 벗어나 오히려 감지에 실패한다. 원본이 잘 되던 이유가 256이었음.
+    let detectorBlaze = null;    // [개선2] BlazePose 폴백 — MoveNet 계열이 모두 실패한 ROI에서만 사용
+
+    // [개선7] 추론은 메인 스레드를 점유하므로 setInterval 기반 퍼센트는 분석 중 멈춘다(0% 고정 원인).
+    //   대신 각 단계 경계에서 명시적으로 퍼센트를 찍고, 이 헬퍼로 '화면에 실제로 그려질 틈'을 준 뒤
+    //   다음 무거운 작업에 들어간다. (rAF → 페인트 → setTimeout 순으로 브라우저에 1프레임 양보)
+    const paintYield = () => new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+
+    // [개선7] BlazePose 최초 셰이더 컴파일이 수 초 이상 걸리는 PC에서는 '대기(응답 없음)' 창의 원인이 되므로,
+    //   한 번이라도 5초를 넘기면 기록해 두고 이후로는 3차 폴백을 건너뛴다. (?perf=hi 로 초기화 가능)
+    let blazeAllowed = true;
+    try { if (localStorage.getItem('poseai_blaze') === 'off') blazeAllowed = false; } catch (e) { }
+    // [개선3] BlazePose는 시작 시 로드하지 않는다.
+    //   기존처럼 시작과 동시에 3개 모델(MoveNet·Thunder·BlazePose)을 병렬로 다운로드+셰이더 컴파일하면
+    //   메인 스레드가 수 초씩 점유되어 브라우저 '페이지 응답 없음(대기)' 대화상자가 반복 발생했음.
+    //   이제 'ROI 인식이 1·2차 모두 실패한 최초 시점'에만 1회 로드한다 (그 순간만 몇 초 소요, 이후 재사용).
+    let _blazeLoading = null;
+    function getBlazeDetector() {
+      if (detectorBlaze) return Promise.resolve(detectorBlaze);
+      if (!_blazeLoading) {
+        _blazeLoading = poseDetection.createDetector(poseDetection.SupportedModels.BlazePose,
+          { runtime: 'tfjs', modelType: 'full' })
+          .then(d => { detectorBlaze = d; console.log('[AI] BlazePose 폴백 모델 준비 완료'); return d; })
+          .catch(e => { console.warn('[AI] BlazePose 로드 실패 — 2단계 폴백까지만 사용', e); _blazeLoading = null; return null; });
+      }
+      return _blazeLoading;
+    }
+    // ── [개선4] 실행 환경 성능 프로파일 ─────────────────────────────────
+    //   'hi' = 실제 GPU: 고해상도(512) 감지 + BlazePose 폴백 사용
+    //   'lo' = CPU 폴백 / 소프트웨어 렌더링(SwiftShader 등, 원격데스크톱·가속 꺼짐에서 흔함)
+    //          / 이전 실행에서 셰이더 컴파일이 비정상적으로 느렸던 환경:
+    //          기존과 동일한 256 해상도 + BlazePose 미사용 → '페이지 응답 없음(대기)' 방지
+    let perfProfile = 'hi';
+    try { if (localStorage.getItem('poseai_perf') === 'lo') perfProfile = 'lo'; } catch (e) { }
+    // [개선7] 주소 뒤에 ?perf=hi 를 붙여 열면 자동 강등 기록을 초기화하고 고성능 모드로 재시도
+    try {
+      if (new URLSearchParams(location.search).get('perf') === 'hi') {
+        localStorage.removeItem('poseai_perf'); localStorage.removeItem('poseai_blaze');
+        perfProfile = 'hi';
+        console.log('[AI] ?perf=hi — 성능 프로파일 기록 초기화, 고성능 모드로 재시도');
+      }
+    } catch (e) { }
+
+    // WebGL이 '성공'해도 실제로는 CPU로 그림을 그리는 소프트웨어 렌더러인 경우를 식별
+    function isSoftwareGL() {
+      try {
+        const cv = document.createElement('canvas');
+        const gl = cv.getContext('webgl2') || cv.getContext('webgl');
+        if (!gl) return true;
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        const r = ext ? (gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '') : '';
+        cv.width = cv.height = 0;
+        console.log('[AI] GPU 렌더러:', r || '(확인 불가)');
+        return /swiftshader|software|llvmpipe|basic render/i.test(r);
+      } catch (e) { return false; }
+    }
+
+    // ── [개선6] AI 진행률 표시 (3개 구간 공용: 초기화 · 이미지 분석 · 영역 추가 분석) ──
+    //   실제 완료 단계에 맞춰 구간 상한을 두고, 구간 안에서는 점근적으로 서서히 증가시켜
+    //   '멈춘 것처럼' 보이지 않게 한다. 실제 단계가 끝나기 전에는 절대 100%에 도달하지 않는 정직한 방식.
+    //   setTo()는 인물별 정밀화처럼 '실측 진행률'이 있는 구간에서 정확한 값을 반영할 때 사용.
+    const aiProg = (() => {
+      let cur = 0, cap = 0, timer = null, label = '';
+      function render() {
+        const pct = Math.round(cur);
+        statusMsg.textContent = `⏳ ${label}... ${pct}%`;
+        statusMsg.style.color = '#f59e0b';
+        const fb = document.getElementById('fileBtn');
+        if (fb && !window._aiReady) fb.textContent = `AI 준비 중... ${pct}%`;
+      }
+      return {
+        reset() { cur = 0; cap = 0; if (timer) { clearInterval(timer); timer = null; } },
+        stage(newCap, newLabel) {
+          cap = newCap; label = newLabel;
+          if (timer) clearInterval(timer);
+          timer = setInterval(() => {
+            cur += Math.max(0.15, (cap - cur) * 0.06);   // 상한에 점근 접근
+            if (cur > cap - 0.5) cur = cap - 0.5;
+            render();
+          }, 150);
+          render();
+        },
+        setTo(v, newLabel) {   // 실측 진행률 반영 (뒤로는 가지 않음)
+          if (newLabel) label = newLabel;
+          if (v > cur) cur = Math.min(v, 99.5);
+          render();
+        },
+        stop() { if (timer) { clearInterval(timer); timer = null; } }
+      };
+    })();
+    const initProg = aiProg;   // (초기화 코드 호환용 별칭)
+
     async function initAI() {
       try {
+        initProg.reset();
+        initProg.stage(12, 'AI 백엔드 초기화 중');
+        await new Promise(r => setTimeout(r, 30));   // 첫 표시가 화면에 먼저 그려지도록 양보
+
         // [개선-핵심] WebGL(GPU) 백엔드 우선 사용 — 기존 CPU 백엔드 대비 추론 10~30배 고속.
         //             WebGL 미지원 환경(구형 브라우저 등)에서만 CPU로 자동 폴백.
         let backend = 'webgl';
         try { await tf.setBackend('webgl'); await tf.ready(); }
         catch (e) { backend = 'cpu'; await tf.setBackend('cpu'); await tf.ready(); }
 
+        // [개선4] WEBGL_DELETE_TEXTURE_THRESHOLD=0 (텍스처 즉시 해제) 설정 '제거'.
+        //   512 해상도의 가변 입력과 결합 시 매 추론마다 텍스처 재할당이 폭주해
+        //   메인 스레드가 수 초씩 멈추는 '대기' 대화상자의 원인이 되어 원복했다.
+        //   (메모리 이득은 소폭 포기 — 나머지 메모리 개선은 모두 유지)
+
+        // [개선4] 소프트웨어 렌더링이면 즉시 경량 프로파일로
+        if (backend !== 'webgl' || isSoftwareGL()) perfProfile = 'lo';
+        window._perfProfile = perfProfile;
+
+        initProg.stage(65, '자세 인식 모델 다운로드 중');
         detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
-          { modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING });
+          {
+            modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+            // [개선2-핵심] hi 프로파일: 내부 입력 해상도 256 → 512 (작게 찍힌 인물 미감지 대폭 감소)
+            // [개선4] lo 프로파일: 원본과 동일한 256 유지 — 느린 환경에서 브라우저 멈춤 방지
+            multiPoseMaxDimension: (perfProfile === 'hi') ? 512 : 256,
+            // [개선2] 저신뢰 인물도 일단 후보로 수용 — 최종 무효 판정은 기존의
+            //   '각도가 하나도 계산되지 않은 감지 제외' 필터가 담당하므로 오탐 증가 없음
+            minPoseScore: 0.15
+          });
 
         // [개선] 고정밀 Thunder 모델은 백그라운드로 병행 로드 — 준비되기 전엔 MultiPose 결과 그대로 사용
-        poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
+        // [개선8] 생성 Promise를 보관 — analyzeROI가 '준비 완료'를 기다릴 수 있게 한다.
+        window._thunderP = poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
           { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER })
           .then(d => { detectorSingle = d; console.log('[AI] Thunder 고정밀 모델 준비 완료'); })
           .catch(() => { });
 
-        // [개선] 워밍업 — WebGL 셰이더를 미리 컴파일해 첫 분석의 1~3초 지연 제거
+        // [개선7-핵심] ROI 전용 MultiPose 256 감지기 — 원본 코드가 영역 추가에서 잘 되던 동작을 복원.
+        //   hi 프로파일에서만 별도 생성(메모리 소폭 증가 트레이드오프),
+        //   lo 프로파일에서는 메인 감지기가 이미 256이므로 그대로 공유.
+        if (perfProfile === 'hi') {
+          window._roiDetP = poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
+            { modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING, multiPoseMaxDimension: 256, minPoseScore: 0.15 })
+            .then(d => { detectorROI = d; console.log('[AI] ROI 전용 256 감지기 준비 완료'); })
+            .catch(() => { });
+        } else {
+          detectorROI = null;   // lo: detectMerged가 메인(256) 감지기를 사용
+        }
+
+        // [개선] 워밍업 — WebGL 셰이더를 미리 컴파일해 첫 분석의 지연 제거
+        // [개선4] 워밍업 소요시간을 측정해, hi 프로파일인데도 5초를 넘기면
+        //   '셰이더 컴파일이 비정상적으로 느린 환경'으로 기록 → 다음 실행부터 자동으로 lo 시작
+        initProg.stage(97, 'GPU 셰이더 컴파일 중');
         try {
           const wc = document.createElement('canvas'); wc.width = wc.height = 64;
+          const tw = performance.now();
           await detector.estimatePoses(wc, { maxPoses: 1 });
+          const warmMs = performance.now() - tw;
+          wc.width = wc.height = 0;
+          console.log(`[AI] 워밍업 ${Math.round(warmMs)}ms (프로파일: ${perfProfile})`);
+          if (perfProfile === 'hi' && warmMs > 5000) {
+            try { localStorage.setItem('poseai_perf', 'lo'); } catch (e) { }
+            console.warn('[AI] 이 환경은 초기 컴파일이 매우 느림 — 다음 실행부터 경량 모드(256)로 시작합니다.');
+          }
         } catch (e) { }
 
-        statusMsg.textContent = `✅ 준비완료 (${backend.toUpperCase()} 가속) — 이미지를 선택하세요`;
+        initProg.stop();   // [개선6] 진행률 타이머 정지 후 완료 표시(100% 도달)
+        statusMsg.textContent = `✅ 준비완료 100% — 이미지를 선택하세요`;
         statusMsg.style.color = '#22c55e';
-      } catch (e) { statusMsg.textContent = '❌ AI 오류 (콘솔 확인)'; console.error(e); }
+
+        // [개선5] AI 준비 완료 → 이미지 선택 활성화.
+        //   기존의 '2.5초 기다렸다 재시도' 임시방편을 대체하는 근본 구조.
+        window._aiReady = true;
+        const fb = document.getElementById('fileBtn');
+        if (fb) { fb.disabled = false; fb.textContent = '이미지 선택'; }
+
+        // [개선5] DB 갤러리 로드는 AI 초기화가 '끝난 뒤' 시작.
+        //   시작 시점에 AI 모델 가중치(수 MB)와 Firestore 전체 문서 다운로드가
+        //   네트워크를 경쟁하면 핵심 기능(분석) 준비가 늦어지므로, 우선순위를 AI에 준다.
+        waitFirebase(loadGallery);
+
+        // [개선9] 보조 감지기(Thunder · ROI 256) 사전 워밍업.
+        //   셰이더 컴파일은 각 모델의 '첫 추론' 때 일어나므로, 기존에는 첫 '영역 추가' 순간에
+        //   두 모델의 컴파일이 한꺼번에 몰려 '대기(응답 없음)' 창의 원인이 됐다.
+        //   준비 완료 직후의 유휴 시간에 하나씩(사이에 화면 양보를 끼워) 미리 컴파일해 둔다.
+        setTimeout(async () => {
+          try {
+            const wc = document.createElement('canvas'); wc.width = wc.height = 64;
+            if (window._thunderP) await window._thunderP;
+            if (detectorSingle) {
+              await detectorSingle.estimatePoses(wc, { maxPoses: 1 });
+              console.log('[AI] Thunder 사전 워밍업 완료');
+            }
+            await paintYield();
+            if (window._roiDetP) await window._roiDetP;
+            if (detectorROI) {
+              await detectorROI.estimatePoses(wc, { maxPoses: 1 });
+              console.log('[AI] ROI 감지기 사전 워밍업 완료');
+            }
+            wc.width = wc.height = 0;
+          } catch (e) { }
+        }, 800);
+      } catch (e) {
+        initProg.stop();   // [개선6] 실패 시 진행률 타이머 정지
+        statusMsg.textContent = '❌ AI 오류 (콘솔 확인)'; console.error(e);
+        const fb = document.getElementById('fileBtn');
+        if (fb) fb.textContent = 'AI 초기화 실패';
+        // AI가 실패해도 과거 기록 열람은 가능하도록 갤러리는 로드
+        waitFirebase(loadGallery);
+      }
     }
     initAI();
 
@@ -764,19 +966,47 @@
     document.getElementById('fileBtn').onclick = () => document.getElementById('fileInput').click();
 
     // ── [개선] 이미지 로드 공통 함수 — 파일선택 · 드래그&드롭 · 클립보드 붙여넣기에서 공용 ──
+    // [개선2-메모리] 초고해상도 사진은 로드 시점에 최대 3200px로 축소.
+    //   12MP(4000×3000) 사진 기준 디코딩 비트맵 ~48MB + base64 수 MB가 상시 상주하던 것이 절반 이하로 감소.
+    //   DB 저장은 어차피 1000px로 압축되므로 저장 품질 손실 없음.
+    //   트레이드오프: ROI 확대 감지의 원천 해상도가 3200px로 제한 — 인식률 우선 요구를 감안해
+    //   상한을 보수적으로(2560이 아닌 3200) 설정. 실사용 영향은 미미.
     function loadImageFile(file) {
       if (!file || !file.type || !file.type.startsWith('image/')) return;
+      // [개선5] AI 준비 전 가드 — 버튼은 비활성이지만 드래그&드롭·붙여넣기는 이 가드가 막는다.
+      if (!detector) {
+        statusMsg.textContent = '⏳ AI 준비 중입니다 — 잠시 후 다시 시도하세요';
+        statusMsg.style.color = '#f59e0b';
+        return;
+      }
       const r = new FileReader();
       r.onload = ev => {
-        img = new Image();
-        img.onload = () => {
-          resetAll();
-          originalImageDataUrl = ev.target.result;  // 원본 저장
-          calcScale(); drawAll();
-          scrollToAnalysis();                        // 분석 화면으로 자동 이동
-          if (detector) runDetect(); else setTimeout(() => { if (detector) runDetect(); }, 2500);
+        const raw = new Image();
+        raw.onload = () => {
+          const MAXDIM = 3200;
+          let finalSrc = ev.target.result;
+          const maxSide = Math.max(raw.width, raw.height);
+          if (maxSide > MAXDIM) {
+            const s = MAXDIM / maxSide;
+            const cv = document.createElement('canvas');
+            cv.width = Math.round(raw.width * s); cv.height = Math.round(raw.height * s);
+            const cc = cv.getContext('2d');
+            cc.imageSmoothingEnabled = true; cc.imageSmoothingQuality = 'high';
+            cc.drawImage(raw, 0, 0, cv.width, cv.height);
+            finalSrc = cv.toDataURL('image/jpeg', 0.9);
+            cv.width = cv.height = 0;   // 캔버스 백킹스토어 즉시 해제
+          }
+          img = new Image();
+          img.onload = () => {
+            resetAll();
+            originalImageDataUrl = finalSrc;  // (축소된) 원본 저장
+            calcScale(); drawAll();
+            scrollToAnalysis();                // 분석 화면으로 자동 이동
+            runDetect();   // [개선5] 이미지 선택 자체가 AI 준비 후에만 가능하므로 재시도 로직 불필요
+          };
+          img.src = finalSrc;
         };
-        img.src = ev.target.result;
+        raw.src = ev.target.result;
       };
       r.readAsDataURL(file);
     }
@@ -805,6 +1035,10 @@
       addMode = false; selRect = null; vZ = 1; vPX = 0; vPY = 0;
       originalImageDataUrl = null;
       currentEditSessionId = null;
+      // [개선2-메모리] 이전 이미지의 1280px 감지용 캐시 캔버스를 즉시 해제
+      //   (기존에는 다음 이미지를 로드할 때까지 수 MB의 백킹스토어가 상주)
+      if (_detCache.canvas) { _detCache.canvas.width = _detCache.canvas.height = 0; }
+      _detCache = { key: null, canvas: null, scale: 1 };
       const sn = document.getElementById('siteName');
       if (sn) sn.value = '';
       const sd = document.getElementById('saveDbBtn');
@@ -836,7 +1070,7 @@
     }
 
     // ── [개선] 감지 입력용 소스 — 초대형 이미지는 1280px로 사전 축소해 GPU 텍스처 업로드 비용 절감.
-    //    (MoveNet MultiPose는 내부에서 어차피 256px 내외로 리사이즈하므로 정확도 손실 없음)
+    //    ([개선2] MultiPose 내부 해상도를 512로 올렸어도 1280px 사전 축소는 여전히 여유가 커서 정확도 손실 없음)
     let _detCache = { key: null, canvas: null, scale: 1 };
     function getDetectSource() {
       const MAXW = 1280;
@@ -871,13 +1105,15 @@
       x1 = Math.min(img.width, x1 + padX); y1 = Math.min(img.height, y1 + padY);
       const w = x1 - x0, h = y1 - y0;
       if (w < 24 || h < 24) return pose;
-      // [수정] 저해상도 대응: 큰 crop은 512px로 축소, 작은 crop(작게 찍힌 사람)은 최대 2배까지 확대
-      const cs = Math.max(Math.min(1, 512 / Math.max(w, h)), Math.min(2, 256 / Math.max(w, h)));
+      // [개선2] 저해상도 대응 강화: 큰 crop은 512px로 축소, 작게 찍힌 사람은 최대 3배(기준 384px)까지 확대
+      //   (기존 2배·256px 기준으로는 80px급 소형 인물이 Thunder 입력에서 여전히 뭉개졌음)
+      const cs = Math.max(Math.min(1, 512 / Math.max(w, h)), Math.min(3, 384 / Math.max(w, h)));
       const cv = document.createElement('canvas');
       cv.width = Math.max(1, Math.round(w * cs)); cv.height = Math.max(1, Math.round(h * cs));
       const cctx = cv.getContext('2d');
       cctx.imageSmoothingEnabled = true; cctx.imageSmoothingQuality = 'high';
       cctx.drawImage(img, x0, y0, w, h, 0, 0, cv.width, cv.height);
+      let result = pose;
       try {
         const rp = await detectorSingle.estimatePoses(cv, { maxPoses: 1 });
         if (rp.length) {
@@ -886,22 +1122,48 @@
             const nk = rp[0].keypoints[i];
             return (nk && nk.score > ok.score) ? nk : ok;   // 관절별로 더 확실한 쪽 채택
           });
-          return Object.assign({}, pose, { keypoints: merged });
+          result = Object.assign({}, pose, { keypoints: merged });
         }
       } catch (e) { console.warn('[AI] 정밀화 실패 — 1차 결과 사용', e); }
-      return pose;
+      cv.width = cv.height = 0;   // [개선2-메모리] 캔버스 백킹스토어 즉시 해제
+      return result;
     }
 
     async function runDetect() {
-      statusMsg.textContent = '🔍 AI 분석 중...'; statusMsg.style.color = '#f59e0b';
-      await new Promise(r => setTimeout(r, 30));   // 상태 문구가 먼저 화면에 그려지도록 양보
+      // [개선7] 진행률: 추론이 메인 스레드를 점유해 타이머(setInterval)가 못 도는 것이 '0% 고정'의 원인.
+      //   각 실제 단계 경계에서 명시적으로 퍼센트를 찍고 paintYield로 화면에 그려질 틈을 준 뒤
+      //   다음 무거운 작업에 들어간다: 5% → 15% → 55% → (인물별 실측) → 97% → 100%
+      aiProg.reset();
+      aiProg.setTo(5, 'AI 분석 · 이미지 전처리 중');
+      await paintYield();
       try {
         const t0 = performance.now();
         const { src, scale } = getDetectSource();
+        aiProg.setTo(15, 'AI 분석 · 전체 자세 감지 중');
+        await paintYield();
         let poses = await detector.estimatePoses(src, { maxPoses: 6, flipHorizontal: false });
         if (scale !== 1) poses.forEach(p => p.keypoints.forEach(kp => { kp.x /= scale; kp.y /= scale; }));
-        poses = await Promise.all(poses.map(p => refinePose(p)));    // [수정] 관절별 병합 정밀화 (관절 손실 불가)
+        aiProg.setTo(55, 'AI 분석 · 전체 자세 감지 완료');
+        // [개선7] 인물별 정밀화 — 순차 처리로 변경해 한 명 끝날 때마다 퍼센트가 '실제로 화면에 그려지도록' 보장.
+        //   (GPU에서는 어차피 직렬 실행되므로 병렬(Promise.all) 대비 속도 손실 없음)
+        if (poses.length) {
+          const total = poses.length;
+          const refined = [];
+          for (let i = 0; i < total; i++) {
+            aiProg.setTo(55 + 40 * i / total, `AI 분석 · 관절 정밀화 중 (${i + 1}/${total}명)`);
+            await paintYield();
+            refined.push(await refinePose(poses[i]));   // [수정] 관절별 병합 정밀화 (관절 손실 불가)
+          }
+          poses = refined;
+          aiProg.setTo(97, 'AI 분석 · 결과 정리 중');
+          await paintYield();
+        }
         const ms = performance.now() - t0;
+        // [개선4] 실제 분석이 5초를 넘기면 이 환경에는 512가 과함 — 다음 실행부터 경량 모드로 기록
+        if (window._perfProfile === 'hi' && ms > 5000) {
+          try { localStorage.setItem('poseai_perf', 'lo'); } catch (e) { }
+          console.warn('[AI] 분석이 매우 느린 환경 — 새로고침 후 경량 모드(256)로 동작합니다.');
+        }
         window.PL = poses.map(p => mkPerson(p));
         // [수정] 사전 신뢰도 필터 제거 — 저해상도의 실제 인물까지 걸러내던 회귀 원인.
         //        대신 '각도가 하나도 계산되지 않은' 완전 무효 감지만 제외 (원본 대비 인원 손실 불가능).
@@ -910,12 +1172,100 @@
         window.AI = window.PL.length > 0 ? 0 : -1;
         pcountEl.textContent = `감지: ${window.PL.length}명`;
         const conf = poses.length ? Math.round(poses.reduce((s, p) => s + poseScore(p), 0) / poses.length * 100) : 0;
+        aiProg.stop();   // [개선6] 진행률 타이머 정지 후 완료(100%) 표시
         statusMsg.textContent = poses.length
-          ? `✅ 완료 ${window.PL.length}명 · ${Math.round(ms)}ms · 신뢰도 ${conf}%`
+          ? `✅ 완료 100% — ${window.PL.length}명 · ${Math.round(ms)}ms · 신뢰도 ${conf}%`
           : `⚠ 인식된 사람 없음 (${Math.round(ms)}ms) — '+ 영역 추가'로 직접 지정하세요`;
         statusMsg.style.color = poses.length ? '#22c55e' : '#f59e0b';
         drawAll(); notify3D();
-      } catch (e) { console.error(e); statusMsg.textContent = '❌ 분석 오류'; statusMsg.style.color = '#e74c3c'; }
+      } catch (e) { aiProg.stop(); console.error(e); statusMsg.textContent = '❌ 분석 오류'; statusMsg.style.color = '#e74c3c'; }
+    }
+
+    // ── [개선2] ROI 인식 폴백 체인용 헬퍼들 ──────────────────────────────
+
+    // 어두운 현장 사진 대응: ROI를 콘트라스트 스트레칭한 사본 캔버스 생성
+    function stretchContrast(srcCv) {
+      const cv = document.createElement('canvas');
+      cv.width = srcCv.width; cv.height = srcCv.height;
+      const cx2 = cv.getContext('2d');
+      cx2.drawImage(srcCv, 0, 0);
+      try {
+        const im = cx2.getImageData(0, 0, cv.width, cv.height), d = im.data;
+        let lo = 255, hi = 0;
+        for (let i = 0; i < d.length; i += 4) {
+          const l = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+          if (l < lo) lo = l; if (l > hi) hi = l;
+        }
+        const range = Math.max(1, hi - lo);
+        if (range < 200) {                       // 이미 콘트라스트가 충분하면 원본 유지
+          const g = 255 / range;
+          for (let i = 0; i < d.length; i += 4) {
+            d[i]     = Math.min(255, Math.max(0, (d[i]     - lo) * g));
+            d[i + 1] = Math.min(255, Math.max(0, (d[i + 1] - lo) * g));
+            d[i + 2] = Math.min(255, Math.max(0, (d[i + 2] - lo) * g));
+          }
+          cx2.putImageData(im, 0, 0);
+        }
+      } catch (e) { }
+      return cv;
+    }
+
+    // BlazePose 33관절 → COCO 17관절 인덱스 매핑 (코,눈,귀,어깨,팔꿈치,손목,엉덩이,무릎,발목)
+    const BLAZE2COCO = [0, 2, 5, 7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28];
+    function blazeToCoco(bp) {
+      return {
+        score: bp.score,
+        keypoints: BLAZE2COCO.map(bi => {
+          const k = (bp.keypoints && bp.keypoints[bi]) || { x: 0, y: 0, score: 0 };
+          return { x: k.x, y: k.y, score: k.score ?? 0 };
+        })
+      };
+    }
+
+    // 캔버스 1장에서 MultiPose+Thunder를 돌려 17개 관절을 신뢰도 높은 쪽으로 병합한 포즈 반환
+    async function detectMerged(cv) {
+      const validCnt = p => p ? p.keypoints.filter(k => k.score > 0.25).length : 0;
+      let a = null, b = null;
+      try {
+        // [개선7-핵심] ROI에는 반드시 256 감지기 사용 (준비 전이면 메인 감지기로 임시 대체).
+        //   512 감지기를 여기 쓰면 '사람이 프레임을 채우는' ROI 입력에서 인식이 실패한다.
+        const det = detectorROI || detector;
+        const r = await det.estimatePoses(cv, { maxPoses: 1 });
+        if (r.length) a = r[0];
+      } catch (e) { }
+      // [개선9-속도] 1차 결과가 이미 충분(유효 관절 8개 이상)하면 Thunder 생략 — 추론 횟수 절반
+      if (validCnt(a) >= 8) return a;
+      try {
+        if (detectorSingle) {
+          const r = await detectorSingle.estimatePoses(cv, { maxPoses: 1 });
+          if (r.length) b = r[0];
+        }
+      } catch (e) { }
+      if (a && b) {
+        return Object.assign({}, a, {
+          keypoints: a.keypoints.map((ok, i) => {
+            const nk = b.keypoints[i];
+            return (nk && nk.score > ok.score) ? nk : ok;
+          })
+        });
+      }
+      return a || b;
+    }
+
+    // [개선8] ROI 크롭 생성기 — 패딩 비율(pad)만큼 주변을 포함해 '인물의 프레임 점유율'을 조절.
+    //   사용자가 그린 영역은 사람 크기와 대체로 일치하므로, 패딩이 곧 인물 크기 정규화 수단이 된다.
+    function buildRoiCrop(rx, ry, rw, rh, pad) {
+      const ex = Math.max(0, rx - rw * pad / 2), ey = Math.max(0, ry - rh * pad / 2);
+      const ew = Math.min(img.width - ex, rw * (1 + pad)), eh = Math.min(img.height - ey, rh * (1 + pad));
+      let s = Math.min(4, Math.max(1, 512 / Math.max(ew, eh)));
+      const maxSide = Math.max(ew, eh) * s;
+      if (maxSide > 1024) s *= 1024 / maxSide;   // 캔버스 최대 변 1024 제한
+      const cv = document.createElement('canvas');
+      cv.width = Math.max(1, Math.round(ew * s)); cv.height = Math.max(1, Math.round(eh * s));
+      const c = cv.getContext('2d');
+      c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      c.drawImage(img, ex, ey, ew, eh, 0, 0, cv.width, cv.height);
+      return { cv, ex, ey, s };
     }
 
     async function analyzeROI(rect) {
@@ -923,59 +1273,105 @@
       const rx = ((rect.x - vPX) / vZ - imgOX) / imgScale, ry = ((rect.y - vPY) / vZ - imgOY) / imgScale;
       const rw = Math.min(img.width - rx, rect.w / (imgScale * vZ)), rh = Math.min(img.height - ry, rect.h / (imgScale * vZ));
       if (rw <= 0 || rh <= 0) return;
-      // [수정] 저해상도 대응: 작은 영역은 최대 2배(기준 320px)까지 확대해 감지 정확도 확보
-      const up = Math.min(2, Math.max(1, 320 / Math.max(rw, rh)));
-      const oc = document.createElement('canvas');
-      oc.width = Math.max(1, Math.round(rw * up)); oc.height = Math.max(1, Math.round(rh * up));
-      const octx = oc.getContext('2d');
-      octx.imageSmoothingEnabled = true; octx.imageSmoothingQuality = 'high';
-      octx.drawImage(img, rx, ry, rw, rh, 0, 0, oc.width, oc.height);
+
+      aiProg.reset();
+      aiProg.setTo(5, '영역 분석 · 준비 중');
+      await paintYield();
+      // [개선8-수정] 보조 감지기(ROI 256, Thunder)가 아직 백그라운드 로드 중이면 완료까지 대기.
+      //   기존에는 준비 전에 영역을 추가하면 512 감지기로 대체되어 인식 실패의 숨은 원인이 됐다.
+      try { await Promise.allSettled([window._roiDetP, window._thunderP].filter(Boolean)); } catch (e) { }
+
       try {
-        // [수정] Thunder 단독 사용 회귀 원복 — Thunder(전신 가정)와 MultiPose(부분신체에 강함)를
-        //        둘 다 실행해 17개 관절 각각을 신뢰도 높은 쪽으로 병합.
-        //        SinglePose는 '항상' 포즈 1개를 반환(저품질 포함)하므로, 인식 성공 여부는
-        //        포즈 존재가 아닌 '유효 관절 수(신뢰도 0.25 초과 3개 이상)'로 판정한다.
-        const cands = [];
-        try {
-          const r = await detector.estimatePoses(oc, { maxPoses: 1 });
-          if (r.length) cands.push(r[0]);
-        } catch (e) { }
-        try {
-          if (detectorSingle) {
-            const r = await detectorSingle.estimatePoses(oc, { maxPoses: 1 });
-            if (r.length) cands.push(r[0]);
+        // 감지 결과 → 이미지 좌표 변환 + 품질(유효 관절 수) 평가
+        const toPerson = (raw, ex, ey, s) => {
+          if (!raw) return null;
+          raw.keypoints.forEach(k => { k.x = k.x / s + ex; k.y = k.y / s + ey; });
+          const q = raw.keypoints.filter(k => k.score > 0.25).length;
+          const cand = mkPerson(raw);
+          return cand.angles.some(a => a) ? { person: cand, q } : null;
+        };
+
+        // [개선8-핵심] 다중 크기 스윕 — 인물의 프레임 점유율을 단계별로 정규화해 시도하고,
+        //   유효 관절 수(q)가 가장 많은 결과를 채택한다. 모델마다 최적 인물 스케일이 다르기 때문:
+        //   pad 0    = 인물이 프레임을 꽉 채움 (Thunder 최적)
+        //   pad 0.4  = 인물이 프레임의 ~70%  (MultiPose 최적)
+        //   pad 0.9  = 넓은 맥락 포함        (영역을 몸 일부만 그렸을 때 보완)
+        //   경량 모드에서는 처리량을 줄이기 위해 앞의 2가지만 시도.
+        // [개선9-속도] 성공 확률 높은 순서(0.4 → 0 → 0.9)로 시도하고 조기 종료를 강화:
+        //   · 유효 관절 8개 이상이면 즉시 종료 (대부분 첫 시도에서 끝남)
+        //   · 두 번째 시도까지 마쳤고 성공한 결과가 하나라도 있으면 세 번째는 생략
+        //   결과적으로 통상 1~2회 추론으로 완료 — 감지력은 유지하고 속도만 회복.
+        const pads = (window._perfProfile === 'hi') ? [0.4, 0, 0.9] : [0.4, 0];
+        let bestRes = null;
+        for (let i = 0; i < pads.length; i++) {
+          aiProg.setTo(10 + 20 * i, `영역 분석 · 크기 정규화 ${i + 1}/${pads.length} 감지 중`);
+          await paintYield();
+          const crop = buildRoiCrop(rx, ry, rw, rh, pads[i]);
+          const raw = await detectMerged(crop.cv);
+          crop.cv.width = crop.cv.height = 0;   // 좌표 변환 전이라도 캔버스는 즉시 해제 가능
+          const res = toPerson(raw, crop.ex, crop.ey, crop.s);
+          console.log(`[ROI] pad=${pads[i]} → ${res ? '성공 (유효관절 ' + res.q + ')' : '실패'}`);
+          if (res && (!bestRes || res.q > bestRes.q)) bestRes = res;
+          if (bestRes && (bestRes.q >= 8 || i >= 1)) break;   // [개선9] 강화된 조기 종료
+        }
+
+        // 2차: 명암 보정 재시도 (어두운 현장 사진 대응) — pad 0.4 기준
+        let fbCrop = null, scv = null;
+        if (!bestRes) {
+          aiProg.setTo(70, '영역 분석 · 명암 보정 재시도 중');
+          await paintYield();
+          fbCrop = buildRoiCrop(rx, ry, rw, rh, 0.4);
+          scv = stretchContrast(fbCrop.cv);
+          const raw = await detectMerged(scv);
+          bestRes = toPerson(raw, fbCrop.ex, fbCrop.ey, fbCrop.s);
+          console.log(`[ROI] 명암보정 → ${bestRes ? '성공 (유효관절 ' + bestRes.q + ')' : '실패'}`);
+        }
+
+        // 3차: BlazePose 폴백 (hi 프로파일 + 이 PC에서 느림 기록이 없을 때만)
+        if (!bestRes && window._perfProfile === 'hi' && blazeAllowed) {
+          aiProg.setTo(78, detectorBlaze
+            ? '영역 분석 · 보조 모델 감지 중'
+            : '영역 분석 · 보조 모델 로드 중 (최초 1회, 수 초 소요)');
+          await paintYield();
+          const tb = performance.now();
+          const bz = await getBlazeDetector();
+          if (bz) {
+            aiProg.setTo(88, '영역 분석 · 보조 모델 감지 중');
+            await paintYield();
+            if (!fbCrop) fbCrop = buildRoiCrop(rx, ry, rw, rh, 0.4);
+            try {
+              const r = await bz.estimatePoses(scv || fbCrop.cv, { maxPoses: 1 });
+              if (r.length) bestRes = toPerson(blazeToCoco(r[0]), fbCrop.ex, fbCrop.ey, fbCrop.s);
+              console.log(`[ROI] BlazePose → ${bestRes ? '성공 (유효관절 ' + bestRes.q + ')' : '실패'}`);
+            } catch (e) { }
           }
-        } catch (e) { }
-        let best = cands[0] || null;
-        if (cands.length === 2) {
-          best = Object.assign({}, cands[0], {
-            keypoints: cands[0].keypoints.map((ok, i) => {
-              const nk = cands[1].keypoints[i];
-              return (nk && nk.score > ok.score) ? nk : ok;
-            })
-          });
+          // [개선7] 로드+컴파일+추론에 5초 이상 걸린 PC는 다음부터 3차 폴백 자동 생략 — '대기' 창 방지
+          if (performance.now() - tb > 5000) {
+            blazeAllowed = false;
+            try { localStorage.setItem('poseai_blaze', 'off'); } catch (e) { }
+            console.warn('[AI] BlazePose가 이 환경에서 과도하게 느림 — 이후 3차 폴백을 생략합니다. (?perf=hi 로 재시도 가능)');
+          }
         }
-        // 인식 성공 판정: 관절 신뢰도 같은 대리 지표가 아니라 '각도가 실제로 1개 이상 계산되었는가'로 판정.
-        // 병합 결과의 관절 커버리지는 MultiPose 단독(=원본 방식) 이상이므로 원본보다 나빠질 수 없다.
-        let np = null, recognized = false;
-        if (best) {
-          best.keypoints.forEach(k => { k.x = k.x / up + rx; k.y = k.y / up + ry; });
-          const cand = mkPerson(best);
-          if (cand.angles.some(a => a)) { np = cand; recognized = true; }
-        }
-        if (!np) np = mkPerson(null);
+
+        // [개선2-메모리] 작업 캔버스 백킹스토어 즉시 해제
+        if (fbCrop) { fbCrop.cv.width = fbCrop.cv.height = 0; }
+        if (scv) { scv.width = scv.height = 0; }
+
+        const recognized = !!bestRes;
+        const np = bestRes ? bestRes.person : mkPerson(null);
         window.PL.push(np); window.PL.sort((a, b) => getCX(a) - getCX(b));
         window.AI = window.PL.indexOf(np); pcountEl.textContent = `감지: ${window.PL.length}명`;
+        aiProg.stop();   // [개선6] 진행률 타이머 정지 후 완료(100%) 표시
         // ▶ 영역 추가로 인식된 작업자를 '완료' 인원에 반영
         if (recognized) {
-          statusMsg.textContent = `✅ 완료 (${window.PL.length}명) — 작업자 추가됨`;
+          statusMsg.textContent = `✅ 완료 100% (${window.PL.length}명) — 작업자 추가됨`;
           statusMsg.style.color = '#22c55e';
         } else {
           statusMsg.textContent = `⚠ 영역에서 인식 실패 — 빈 작업자 추가됨 (점을 직접 찍으세요)`;
           statusMsg.style.color = '#f59e0b';
         }
         drawAll(); notify3D();
-      } catch (e) { console.error(e); }
+      } catch (e) { aiProg.stop(); console.error(e); }
     }
 
     // 🔻 추가: 작업자의 시선 방향(오른쪽=true, 왼쪽=false)을 판별하는 통합 함수
@@ -1799,16 +2195,21 @@
         c2.height = origH; drawAll();
 
         statusMsg.textContent = '이미지 압축 중...';
-        let compOrig = await compressImage(originalImageDataUrl, 1000, 0.6);
-        let compExport = await compressImage(rawExport, 1000, 0.6);
-        // [개선] 갤러리 전용 초경량 썸네일(300px) — 목록 로드가 훨씬 가볍고 빨라짐
-        const compThumb = await compressImage(rawExport, 300, 0.55);
+        // [개선6] 압축 3건 병렬화 — 기존 순차 await 대비 압축 구간 소요시간 약 1/3 (2번 DB속도 차선책)
+        let [compOrig, compExport, compThumb] = await Promise.all([
+          compressImage(originalImageDataUrl, 1000, 0.6),
+          compressImage(rawExport, 1000, 0.6),
+          // [개선] 갤러리 전용 초경량 썸네일(300px) — 목록 로드가 훨씬 가볍고 빨라짐
+          compressImage(rawExport, 300, 0.55)
+        ]);
 
         // [개선] Firestore 문서 1MB 한도 보호 — 초과 위험 시 자동으로 한 단계 더 압축
         if (compOrig.length + compExport.length + compThumb.length > 900000) {
           statusMsg.textContent = '용량 초과 위험 — 추가 압축 중...';
-          compOrig = await compressImage(originalImageDataUrl, 800, 0.45);
-          compExport = await compressImage(rawExport, 800, 0.45);
+          [compOrig, compExport] = await Promise.all([          // [개선6] 재압축도 병렬
+            compressImage(originalImageDataUrl, 800, 0.45),
+            compressImage(rawExport, 800, 0.45)
+          ]);
         }
 
         statusMsg.textContent = 'DB 전송 중...';
@@ -1852,7 +2253,7 @@
         alert('오류가 발생했습니다. 콘솔을 확인하세요.');
         statusMsg.textContent = '저장 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
-        this.disabled = false; if (fileBtn) fileBtn.disabled = false;
+        this.disabled = false; if (fileBtn) fileBtn.disabled = !window._aiReady;   // [개선5] AI 준비 상태 반영
         c2.style.pointerEvents = 'auto'; c2.style.opacity = '1';
       }
     });
@@ -1971,6 +2372,10 @@
         const docList = [];
         qs.forEach(d => docList.push(d));
         docList.sort((a, b) => b.id.localeCompare(a.id));
+        // [개선2-메모리] 기존에는 클릭 핸들러 클로저가 각 세션의 전체 문서(원본+내보내기 이미지,
+        //   최대 ~900KB base64)를 갤러리가 살아있는 내내 붙잡아 세션 50개 기준 ~45MB가 상주했음.
+        //   이제 카드에는 썸네일과 sid만 남기고, 실제 데이터는 '클릭한 순간' 해당 세션 1건만 조회한다.
+        //   트레이드오프: 카드 클릭 시 문서 1건 재다운로드(수백 KB, 보통 1초 미만)가 추가됨.
         docList.forEach(docSnap => {
           const data = docSnap.data();
           const sid = docSnap.id;
@@ -1981,7 +2386,17 @@
             <img src="${data.thumbImageData || data.exportImageData}" alt="썸네일" loading="lazy"
                  title="현장: ${data.siteName || '미지정'}">
             <div class="thumb-card-label">${data.siteName || '미지정'}</div>`;
-          card.querySelector('img').addEventListener('click', () => loadSessionForEdit(sid, data));
+          card.querySelector('img').addEventListener('click', async () => {
+            try {
+              statusMsg.textContent = '데이터 불러오는 중...'; statusMsg.style.color = '#f59e0b';
+              const snap = await window.fsGetDoc(window.fsDoc(window.fbDb, 'sessions', sid));
+              if (!snap.exists()) { alert('해당 데이터를 찾을 수 없습니다. (삭제되었을 수 있음)'); await loadGallery(); return; }
+              loadSessionForEdit(sid, snap.data());
+            } catch (err) {
+              console.error(err); alert('데이터 불러오기에 실패했습니다.');
+              statusMsg.textContent = '불러오기 실패'; statusMsg.style.color = '#e74c3c';
+            }
+          });
           card.querySelector('.btn-delete-thumb').addEventListener('click', (e) => {
             e.stopPropagation(); deleteSession(sid);
           });
@@ -2049,7 +2464,7 @@
         console.error(err); alert('삭제 중 오류가 발생했습니다.');
         statusMsg.textContent = '삭제 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
-        if (fileBtn) fileBtn.disabled = false;
+        if (fileBtn) fileBtn.disabled = !window._aiReady;   // [개선5] AI 준비 상태 반영
         if (saveDbBtn) saveDbBtn.disabled = false;
         c2.style.pointerEvents = 'auto'; c2.style.opacity = '1';
       }
@@ -2065,7 +2480,9 @@
           if (w > maxWidth) { h = Math.round(h * maxWidth / w); w = maxWidth; }
           cvs.width = w; cvs.height = h;
           cvs.getContext('2d').drawImage(tmp, 0, 0, w, h);
-          resolve(cvs.toDataURL('image/jpeg', quality));
+          const out = cvs.toDataURL('image/jpeg', quality);
+          cvs.width = cvs.height = 0;   // [개선2-메모리] 캔버스 백킹스토어 즉시 해제
+          resolve(out);
         };
       });
     }
@@ -2075,7 +2492,8 @@
       else if (tries > 0) { setTimeout(() => waitFirebase(cb, tries - 1), 200); }
       else { console.warn('Firebase 초기화 타임아웃'); }
     }
-    waitFirebase(loadGallery);
+    // [개선5] 갤러리 로드는 여기서 즉시 시작하지 않는다 — initAI() 완료 시점에 호출됨.
+    //   (AI 모델 다운로드와 Firestore 전체 문서 다운로드의 네트워크 경쟁 방지)
 
   </script>
 
