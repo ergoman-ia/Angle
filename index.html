@@ -389,7 +389,30 @@
 
     /* ===== Data management panel ===== */
     .panel-data { flex: 1 1 300px; min-width: 290px; max-width: 360px; }
-    .panel-gallery { flex: 1 1 1180px; min-width: 0; }
+    .panel-gallery { flex: 1 1 1180px; min-width: 0; position: relative; }
+    /* [개선12] AI 초기화 전 갤러리 잠금 — 클릭 차단 + 흐림 + 이유 안내 배지 */
+    .panel-gallery.gallery-locked .gallery-viewport {
+      pointer-events: none;
+      opacity: .45;
+      filter: saturate(.6);
+      transition: opacity .25s ease, filter .25s ease;
+    }
+    .gallery-lock-note {
+      display: none;
+      position: absolute;
+      left: 50%; top: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 5;
+      background: rgba(14, 23, 38, .88);
+      color: #ffd591;
+      font-size: 13px; font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 999px;
+      box-shadow: 0 4px 14px rgba(14, 23, 38, .25);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+    .panel-gallery.gallery-locked .gallery-lock-note { display: block; }
 
     .data-form { display: flex; flex-direction: column; gap: 9px; }
     .data-form input[type=text] {
@@ -550,8 +573,10 @@
       <!-- ===== Group: gallery + data management ===== -->
       <div class="group group-top">
         <div class="row">
-          <div class="panel panel-gallery">
+          <div class="panel panel-gallery gallery-locked" id="galleryPanel">
             <div class="eyebrow">저장 내역 <span class="em">클릭하여 불러오기</span></div>
+            <!-- [개선12] AI 준비 전에는 목록은 보이되 선택은 잠금 — 이유를 배지로 안내 -->
+            <div class="gallery-lock-note" id="galleryLockNote">⏳ AI 준비 중 — 완료되면 선택할 수 있습니다</div>
             <div class="gallery-viewport">
               <button class="gallery-arrow gallery-arrow-left" id="galleryArrowLeft" type="button" aria-label="이전">‹</button>
               <div class="gallery-container" id="galleryContainer">
@@ -799,6 +824,13 @@
     })();
     const initProg = aiProg;   // (초기화 코드 호환용 별칭)
 
+    // [개선12] 갤러리 선택 잠금 해제 — AI 초기화 완료(또는 실패) 시 호출.
+    //   잠금 중에는 목록이 흐리게 보이고 클릭이 차단되며 '⏳ AI 준비 중' 배지가 표시된다.
+    function unlockGallery() {
+      const p = document.getElementById('galleryPanel');
+      if (p) p.classList.remove('gallery-locked');
+    }
+
     async function initAI() {
       try {
         initProg.reset();
@@ -880,6 +912,8 @@
 
         // [개선10] 갤러리 로드는 이제 페이지 시작 즉시(AI 초기화와 병렬로) 시작된다 — 아래 waitFirebase 참조.
         //   AI 초기화 동안 목록이 비어 보여 '서버 장애'로 오해되는 문제가 네트워크 경쟁보다 크다고 판단.
+        // [개선12] AI 준비 완료 → 갤러리 선택 잠금 해제 (목록은 처음부터 보이되, 준비 전엔 클릭 불가였음)
+        unlockGallery();
 
         // [개선9] 보조 감지기(Thunder · ROI 256) 사전 워밍업.
         //   셰이더 컴파일은 각 모델의 '첫 추론' 때 일어나므로, 기존에는 첫 '영역 추가' 순간에
@@ -907,7 +941,9 @@
         statusMsg.textContent = '❌ AI 오류 (콘솔 확인)'; console.error(e);
         const fb = document.getElementById('fileBtn');
         if (fb) fb.textContent = 'AI 초기화 실패';
-        // (갤러리는 시작 시점에 이미 로드 중이므로 여기서 별도 처리 불필요)
+        // [개선12] AI 실패 시에도 갤러리 잠금은 해제 — 저장 기록 '열람·편집'은 AI 없이도 가능하기 때문.
+        //   (AI가 필요한 것은 신규 이미지 분석뿐이며, 그 경로는 fileBtn이 계속 막고 있음)
+        unlockGallery();
       }
     }
     initAI();
