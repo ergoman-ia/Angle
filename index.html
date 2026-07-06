@@ -869,7 +869,7 @@
         } catch (e) { }
 
         initProg.stop();   // [개선6] 진행률 타이머 정지 후 완료 표시(100% 도달)
-        statusMsg.textContent = `✅ 준비완료 100% — 이미지를 선택하세요`;
+        statusMsg.textContent = `✅ 준비완료 100% (${backend.toUpperCase()}${perfProfile === 'lo' ? ' · 경량 모드' : ' 가속'}) — 이미지를 선택하세요`;
         statusMsg.style.color = '#22c55e';
 
         // [개선5] AI 준비 완료 → 이미지 선택 활성화.
@@ -878,10 +878,8 @@
         const fb = document.getElementById('fileBtn');
         if (fb) { fb.disabled = false; fb.textContent = '이미지 선택'; }
 
-        // [개선5] DB 갤러리 로드는 AI 초기화가 '끝난 뒤' 시작.
-        //   시작 시점에 AI 모델 가중치(수 MB)와 Firestore 전체 문서 다운로드가
-        //   네트워크를 경쟁하면 핵심 기능(분석) 준비가 늦어지므로, 우선순위를 AI에 준다.
-        waitFirebase(loadGallery);
+        // [개선10] 갤러리 로드는 이제 페이지 시작 즉시(AI 초기화와 병렬로) 시작된다 — 아래 waitFirebase 참조.
+        //   AI 초기화 동안 목록이 비어 보여 '서버 장애'로 오해되는 문제가 네트워크 경쟁보다 크다고 판단.
 
         // [개선9] 보조 감지기(Thunder · ROI 256) 사전 워밍업.
         //   셰이더 컴파일은 각 모델의 '첫 추론' 때 일어나므로, 기존에는 첫 '영역 추가' 순간에
@@ -909,8 +907,7 @@
         statusMsg.textContent = '❌ AI 오류 (콘솔 확인)'; console.error(e);
         const fb = document.getElementById('fileBtn');
         if (fb) fb.textContent = 'AI 초기화 실패';
-        // AI가 실패해도 과거 기록 열람은 가능하도록 갤러리는 로드
-        waitFirebase(loadGallery);
+        // (갤러리는 시작 시점에 이미 로드 중이므로 여기서 별도 처리 불필요)
       }
     }
     initAI();
@@ -2492,8 +2489,12 @@
       else if (tries > 0) { setTimeout(() => waitFirebase(cb, tries - 1), 200); }
       else { console.warn('Firebase 초기화 타임아웃'); }
     }
-    // [개선5] 갤러리 로드는 여기서 즉시 시작하지 않는다 — initAI() 완료 시점에 호출됨.
-    //   (AI 모델 다운로드와 Firestore 전체 문서 다운로드의 네트워크 경쟁 방지)
+    // [개선10] 갤러리 로드를 페이지 시작 즉시(AI 초기화와 병렬로) 시작.
+    //   Firestore 목록 조회는 보통 AI 모델 준비보다 훨씬 빨리 끝나므로, 사용자는
+    //   AI가 준비되는 동안에도 저장된 작업 목록을 먼저 보게 된다 — '서버 장애' 오해 방지.
+    //   트레이드오프: 세션이 많이 쌓인 경우 갤러리 다운로드가 AI 모델 다운로드와 네트워크를
+    //   일부 공유해 AI 준비가 약간 늦어질 수 있음 (진행률 표시로 체감은 완화됨).
+    waitFirebase(loadGallery);
 
   </script>
 
