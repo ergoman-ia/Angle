@@ -2365,10 +2365,21 @@
           gallery.innerHTML = '<p style="color:#666;font-size:13px;">저장된 작업 내역이 없습니다.</p>';
           return;
         }
-        // [개선] 최신 저장분이 맨 앞에 오도록 정렬 (session_YYYYMMDD_HHMMSS ID 역순)
+        // [개선11] 최신 '저장 또는 업데이트'가 맨 앞(왼쪽)에 오도록 정렬.
+        //   기존의 ID(session_YYYYMMDD_HHMMSS) 역순 정렬은 '최초 저장 시각' 기준이라
+        //   기존 세션을 업데이트해도 목록 위치가 움직이지 않는 맹점이 있었다.
+        //   이제 updatedAt → createdAt → ID 파싱 순서로 실제 최종 저장 시각을 사용한다.
+        const sortKey = d => {
+          const data = d.data();
+          const t = data.updatedAt || data.createdAt;
+          if (t && typeof t.toMillis === 'function') return t.toMillis();
+          const m = /^session_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(d.id);
+          if (m) return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+          return 0;
+        };
         const docList = [];
         qs.forEach(d => docList.push(d));
-        docList.sort((a, b) => b.id.localeCompare(a.id));
+        docList.sort((a, b) => sortKey(b) - sortKey(a));
         // [개선2-메모리] 기존에는 클릭 핸들러 클로저가 각 세션의 전체 문서(원본+내보내기 이미지,
         //   최대 ~900KB base64)를 갤러리가 살아있는 내내 붙잡아 세션 50개 기준 ~45MB가 상주했음.
         //   이제 카드에는 썸네일과 sid만 남기고, 실제 데이터는 '클릭한 순간' 해당 세션 1건만 조회한다.
