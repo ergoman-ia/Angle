@@ -10,13 +10,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.15.0/dist/tf-backend-webgl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-  <!-- [콜드 스타트 개선] DNS·TLS 핸드셰이크를 미리 끝내 둔다.
-       첫 방문에서 tfjs·모델 가중치·Firebase를 받을 때 왕복 지연이 줄어든다. -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link rel="preconnect" href="https://storage.googleapis.com" crossorigin>
-  <link rel="preconnect" href="https://tfhub.dev" crossorigin>
-  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
@@ -548,7 +541,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import {
       getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
-      collection, getDocs, query, orderBy, limit, getCountFromServer, serverTimestamp
+      collection, getDocs, query, orderBy, limit, serverTimestamp
     }
       from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
@@ -576,7 +569,6 @@
         window.fsQuery = query;
         window.fsOrderBy = orderBy;
         window.fsLimit = limit;
-        window.fsGetCount = getCountFromServer;   // 문서를 내려받지 않고 개수만 세는 집계 쿼리
         window.fsServerTimestamp = serverTimestamp;
       } catch (e) { console.error('[Firebase] 초기화 실패 — DB 기능 없이 동작합니다.', e); }
     }
@@ -614,7 +606,7 @@
           <div class="panel panel-gallery gallery-locked" id="galleryPanel">
             <div class="eyebrow">저장 내역(50건 제한) <span class="em">클릭하여 불러오기</span></div>
             <!-- [개선12] AI 준비 전에는 목록은 보이되 선택은 잠금 — 이유를 배지로 안내 -->
-            <div class="gallery-lock-note" id="galleryLockNote">⏳ 목록 불러오는 중…</div>
+            <div class="gallery-lock-note" id="galleryLockNote">⏳ AI 준비 중 — 완료되면 선택할 수 있습니다</div>
             <div class="gallery-viewport">
               <button class="gallery-arrow gallery-arrow-left" id="galleryArrowLeft" type="button" aria-label="이전">‹</button>
               <div class="gallery-container" id="galleryContainer">
@@ -646,7 +638,7 @@
           <!-- 2D panel -->
           <div class="panel panel-2d">
             <div class="toolbar">
-              <button class="btn btn-blue" id="fileBtn">이미지 선택</button>
+              <button class="btn btn-blue" id="fileBtn" disabled>AI 준비 중...</button>
               <input type="file" id="fileInput" accept="image/*">
               <button class="btn btn-teal" id="addBtn">+ 영역 추가</button>
               <button class="btn btn-red" id="delBtn">현재 삭제</button>
@@ -939,9 +931,7 @@
         } catch (e) { }
 
         initProg.stop();   // [개선6] 진행률 타이머 정지 후 완료 표시(100% 도달)
-        // 백엔드·프로파일 표기는 화면에서 빼고 콘솔에만 남긴다(문제 추적용).
-        console.info(`[AI] 준비 완료 — 백엔드 ${backend.toUpperCase()} · 프로파일 ${perfProfile}`);
-        statusMsg.textContent = '✅ 준비 완료 100% — 이미지를 선택하세요';
+        statusMsg.textContent = `✅ 준비완료 100% (${backend.toUpperCase()}${perfProfile === 'lo' ? ' · 경량 모드' : ' 가속'}) — 이미지를 선택하세요`;
         statusMsg.style.color = '#22c55e';
 
         // [개선5] AI 준비 완료 → 이미지 선택 활성화.
@@ -986,42 +976,7 @@
         unlockGallery();
       }
     }
-
-    /* =====================================================================
-       [콜드 스타트 개선] AI 지연 초기화
-       -------------------------------------------------------------------
-       첫 방문에서 무거운 건 Firestore가 아니라 AI 자원 다운로드다.
-       tfjs 본체 + MoveNet MultiPose + Thunder 모델 가중치까지 수 MB를 받고
-       GPU 셰이더까지 컴파일한 뒤에야 화면이 쓸 만해진다.
-       두 번째 방문이 빨랐던 건 이것들이 브라우저 캐시에 남아서다.
-
-       그런데 '저장 내역을 열어 다시 보는' 작업에는 AI가 전혀 필요 없다.
-       그래서 AI 초기화를 페이지 로드 직후가 아니라
-         (1) 갤러리가 다 그려진 뒤의 유휴 시간, 또는
-         (2) 사용자가 이미지 선택·영역 추가를 눌러 실제로 필요해진 순간
-       중 먼저 오는 쪽에 시작한다. 목록 조회와 대역폭을 다투지도 않는다.
-    ===================================================================== */
-    let _aiStarted = false;
-    window._aiInitP = null;
-    function ensureAI() {
-      if (!_aiStarted) {
-        _aiStarted = true;
-        console.info('[AI] 초기화 시작');
-        window._aiInitP = initAI();
-      }
-      return window._aiInitP;
-    }
-    window.ensureAI = ensureAI;
-
-    // 갤러리 렌더가 끝나면 loadGallery가 scheduleAI()를 부른다.
-    // 갤러리가 실패하거나 DB가 없는 경우를 대비해 3초 뒤 보조 트리거도 둔다.
-    window.scheduleAI = function () {
-      if (_aiStarted) return;
-      const start = () => ensureAI();
-      if (window.requestIdleCallback) requestIdleCallback(start, { timeout: 1500 });
-      else setTimeout(start, 300);
-    };
-    setTimeout(() => window.scheduleAI(), 3000);
+    initAI();
 
     function drawPlaceholder() {
       ctx.fillStyle = '#f1f4f8'; ctx.fillRect(0, 0, 880, 580);
@@ -1071,16 +1026,7 @@
       window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
     }
 
-    document.getElementById('fileBtn').onclick = async () => {
-      // AI가 아직이면 이 순간 시작하고, 준비될 때까지 기다린 뒤 파일 창을 연다.
-      if (!window._aiReady) {
-        statusMsg.textContent = 'AI 준비 중... 잠시만 기다려 주세요';
-        statusMsg.style.color = '#f59e0b';
-        try { await ensureAI(); } catch (e) { }
-        if (!window._aiReady) { alert('AI 초기화에 실패했습니다. 콘솔을 확인해 주세요.'); return; }
-      }
-      document.getElementById('fileInput').click();
-    };
+    document.getElementById('fileBtn').onclick = () => document.getElementById('fileInput').click();
 
     // ── [개선] 이미지 로드 공통 함수 — 파일선택 · 드래그&드롭 · 클립보드 붙여넣기에서 공용 ──
     // [개선2-메모리] 초고해상도 사진은 로드 시점에 최대 3200px로 축소.
@@ -1621,15 +1567,6 @@
     // Events
     document.getElementById('addBtn').addEventListener('click', function () {
       if (!img.src || img.width === 0) { alert('이미지 먼저!'); return; }
-      // 실제로 AI가 필요한 지점 — 아직이면 여기서 시작해 준비될 때까지 기다린다.
-      if (!window._aiReady) {
-        statusMsg.textContent = 'AI 준비 중... 잠시만 기다려 주세요';
-        statusMsg.style.color = '#f59e0b';
-        ensureAI().then(() => {
-          if (window._aiReady) { statusMsg.textContent = '준비 완료 — 다시 눌러 주세요'; statusMsg.style.color = '#22c55e'; }
-        });
-        return;
-      }
       addMode = !addMode;
       if (addMode) { this.classList.add('active'); this.textContent = '취소(ESC)'; c2.style.cursor = 'crosshair'; }
       else { this.classList.remove('active'); this.textContent = '+ 영역 추가'; c2.style.cursor = 'crosshair'; selRect = null; drawAll(); }
@@ -2364,14 +2301,22 @@
         if (isUpdating) {
           payload.updatedAt = window.fsServerTimestamp();
           await window.fsUpdateDoc(docRef, payload);
-          // [경량 인덱스] 업데이트 시에는 createdAt을 건드리지 않는다.
-          //   merge와 함께 createdAt: null을 보내면 기존 값이 null로 덮여 정렬이 망가진다.
-          await writeGalleryIndex(sessionId, siteName, compThumb, false);
+          await window.fsSetDoc(window.fsDoc(window.fbDb, 'sessionGalleryIndex', sessionId), {
+            siteName,
+            thumbImageData: compThumb,
+            updatedAt: window.fsServerTimestamp(),
+            createdAt: null
+          }, { merge: true });
           alert('성공적으로 업데이트 되었습니다.');
         } else {
           payload.createdAt = window.fsServerTimestamp();
           await window.fsSetDoc(docRef, payload);
-          await writeGalleryIndex(sessionId, siteName, compThumb, true);
+          await window.fsSetDoc(window.fsDoc(window.fbDb, 'sessionGalleryIndex', sessionId), {
+            siteName,
+            thumbImageData: compThumb,
+            createdAt: window.fsServerTimestamp(),
+            updatedAt: window.fsServerTimestamp()
+          });
           alert('새 데이터가 DB에 저장 완료되었습니다!');
         }
         statusMsg.textContent = '저장 완료'; statusMsg.style.color = '#22c55e';
@@ -2383,7 +2328,7 @@
         alert('오류가 발생했습니다. 콘솔을 확인하세요.');
         statusMsg.textContent = '저장 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
-        this.disabled = false; if (fileBtn) fileBtn.disabled = false;   // 클릭 시점에 ensureAI()가 처리
+        this.disabled = false; if (fileBtn) fileBtn.disabled = !window._aiReady;   // [개선5] AI 준비 상태 반영
         c2.style.pointerEvents = 'auto'; c2.style.opacity = '1';
       }
     });
@@ -2491,112 +2436,61 @@
     /* =====================================================================
        갤러리 로드 / 불러오기 / 삭제
     ===================================================================== */
-
-    /* =====================================================================
-       [DB 로딩 근본 최적화] 갤러리 전용 경량 인덱스 컬렉션
-       -------------------------------------------------------------------
-       배경: sessions 문서 하나에는 원본·내보내기 이미지가 base64로 들어 있어
-             문서당 최대 ~900KB다. 그런데 갤러리에 필요한 건 썸네일(약 20KB)과
-             현장명뿐이고, Firestore에는 특정 필드만 골라 받는 기능이 없다.
-             따라서 getDocs(sessions)는 개수 제한을 걸든 말든 세션마다 900KB를
-             전부 내려받는다. (세션이 제한보다 적으면 limit은 아무 효과가 없다)
-       방식: 썸네일과 현장명만 담은 별도 컬렉션을 두고 갤러리는 그쪽만 읽는다.
-             내려받는 양이 40배 이상 줄어든다. 실제 세션 데이터는 기존대로
-             카드를 클릭한 순간 해당 1건만 조회한다.
-    ===================================================================== */
-    const GALLERY_INDEX_COL = 'sessionGalleryIndex';
-    const GALLERY_LIMIT = 50;   // 화면에 표시할 최신 세션 수 (이 값만 바꾸면 됨)
-
-    // 저장·업데이트 시 인덱스 문서를 함께 기록한다.
-    // 인덱스 기록이 실패해도 본 저장은 이미 끝났으므로 경고만 남기고 넘어간다.
-    async function writeGalleryIndex(sessionId, siteName, thumbData, isNew) {
-      try {
-        const rec = {
-          siteName: siteName || '미지정',
-          thumbImageData: thumbData || '',
-          updatedAt: window.fsServerTimestamp()
-        };
-        if (isNew) rec.createdAt = window.fsServerTimestamp();
-        await window.fsSetDoc(
-          window.fsDoc(window.fbDb, GALLERY_INDEX_COL, sessionId), rec, { merge: true }
-        );
-      } catch (e) {
-        console.warn('[갤러리] 인덱스 기록 실패 — 다음 목록 열람 때 자동 복구됩니다.', e);
-      }
-    }
-
-    // 인덱스가 없거나 일부만 있는 경우 채워 넣는다.
-    // ※ 개수 제한을 걸지 않는다. 제한을 걸면 그 바깥의 세션은 인덱스가 영영 생기지
-    //   않아 갤러리에서 사라진 것처럼 보인다.
-    async function rebuildGalleryIndex(gallery) {
-      if (gallery) {
-        gallery.innerHTML = '<p style="color:#666;font-size:13px;">목록 인덱스를 만드는 중입니다… ' +
-          '(처음 한 번만 오래 걸리며, 다음부터는 빠르게 열립니다)</p>';
-      }
-      const all = await window.fsGetDocs(window.fsCollection(window.fbDb, 'sessions'));
-      const jobs = [];
-      all.forEach(d => {
-        const v = d.data();
-        const t = v.updatedAt || v.createdAt || null;   // 둘 다 없으면 null (undefined는 쓰기 오류)
-        jobs.push(window.fsSetDoc(
-          window.fsDoc(window.fbDb, GALLERY_INDEX_COL, d.id),
-          {
-            siteName: v.siteName || '미지정',
-            thumbImageData: v.thumbImageData || v.exportImageData || '',
-            createdAt: v.createdAt || t || null,
-            updatedAt: t
-          },
-          { merge: true }
-        ));
-      });
-      // 동시 쓰기 폭주를 막기 위해 20건씩 나눠 보낸다.
-      for (let i = 0; i < jobs.length; i += 20) await Promise.all(jobs.slice(i, i + 20));
-      console.info(`[갤러리] 인덱스 생성 완료 — ${jobs.length}건`);
-    }
-
     async function loadGallery() {
       const gallery = document.getElementById('galleryContainer');
-      // [계측] 어느 구간이 실제로 오래 걸리는지 콘솔에 숫자로 남긴다.
-      const T0 = performance.now();
-      const ms = () => Math.round(performance.now() - T0);
-      let tQuery = 0, tRebuild = 0, kb = 0;
       try {
-        const indexRef = window.fsCollection(window.fbDb, GALLERY_INDEX_COL);
-
-        // 최신순 정렬은 서버에서 처리한다. updatedAt은 저장·업데이트마다 항상 기록되므로
-        // 별도 색인 설정 없이 동작하고, 수정한 세션이 곧바로 맨 앞으로 온다.
-        const fetchIndex = () => window.fsGetDocs(
-          window.fsQuery(indexRef, window.fsOrderBy('updatedAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
-        );
-
+        // [DB 로딩 핵심 최적화] 갤러리 전용 경량 인덱스만 조회한다.
+        // 원본 sessions 문서에는 이미지/분석 데이터가 포함되어 있으므로 목록 표시 때 읽지 않는다.
+        const GALLERY_LIMIT = 50;
+        const indexRef = window.fsCollection(window.fbDb, 'sessionGalleryIndex');
         let qs = null;
-        try {
-          const q0 = performance.now();
-          qs = await fetchIndex();
-          tQuery = Math.round(performance.now() - q0);
-        } catch (qErr) {
-          console.warn('[갤러리] 경량 인덱스 조회 실패 — 인덱스를 다시 만들어 봅니다.', qErr);
+
+        if (window.fsQuery && window.fsOrderBy && window.fsLimit) {
+          try {
+            qs = await window.fsGetDocs(
+              window.fsQuery(indexRef, window.fsOrderBy('updatedAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
+            );
+          } catch (qErr) {
+            console.warn('[갤러리] 경량 인덱스 조회 실패', qErr);
+          }
         }
 
-        // 인덱스가 실제 세션 수보다 모자라면 채워 넣는다.
-        //   getCountFromServer는 문서를 내려받지 않고 개수만 세므로 비용이 거의 없다.
-        //   집계를 못 쓰는 환경에서는 '인덱스가 비었을 때'만 재생성한다.
-        try {
-          let needRebuild = !qs || qs.empty;
-          if (!needRebuild && window.fsGetCount && qs.size < GALLERY_LIMIT) {
-            const idxCnt = (await window.fsGetCount(indexRef)).data().count;
-            const secCnt = (await window.fsGetCount(window.fsCollection(window.fbDb, 'sessions'))).data().count;
-            needRebuild = idxCnt < secCnt;
+        // 기존에 저장된 sessions가 있고 경량 인덱스가 아직 없는 경우에만
+        // 최초 1회 기존 데이터를 읽어 갤러리 인덱스를 만들어 준다.
+        if (!qs || qs.empty) {
+          const oldCol = window.fsCollection(window.fbDb, 'sessions');
+          let oldQs = null;
+          try {
+            oldQs = await window.fsGetDocs(
+              window.fsQuery(oldCol, window.fsOrderBy('createdAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
+            );
+          } catch (e) {
+            oldQs = await window.fsGetDocs(oldCol);
           }
-          if (needRebuild) {
-            console.warn('[갤러리] 인덱스 재생성이 실행됩니다 — 이번 로딩은 느립니다.');
-            const r0 = performance.now();
-            await rebuildGalleryIndex(gallery);
-            qs = await fetchIndex();
-            tRebuild = Math.round(performance.now() - r0);
+
+          if (!oldQs.empty) {
+            const indexWrites = [];
+            oldQs.forEach(d => {
+              const data = d.data();
+              const t = data.updatedAt || data.createdAt || null;
+              indexWrites.push(
+                window.fsSetDoc(
+                  window.fsDoc(window.fbDb, 'sessionGalleryIndex', d.id),
+                  {
+                    siteName: data.siteName || '미지정',
+                    thumbImageData: data.thumbImageData || data.exportImageData || '',
+                    createdAt: data.createdAt || t || null,
+                    updatedAt: t || data.createdAt || null
+                  }
+                )
+              );
+            });
+            await Promise.all(indexWrites);
+
+            qs = await window.fsGetDocs(
+              window.fsQuery(indexRef, window.fsOrderBy('updatedAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
+            );
           }
-        } catch (rErr) {
-          console.warn('[갤러리] 인덱스 점검 실패 — 현재 인덱스로 표시합니다.', rErr);
         }
 
         gallery.innerHTML = '';
@@ -2604,12 +2498,6 @@
           gallery.innerHTML = '<p style="color:#666;font-size:13px;">저장된 작업 내역이 없습니다.</p>';
           return;
         }
-        // [개선11] 최신 '저장 또는 업데이트'가 맨 앞(왼쪽)에 오도록 정렬.
-        //   이제 updatedAt 내림차순을 서버가 처리하므로 클라이언트 정렬이 필요 없다.
-        //   수정한 세션은 updatedAt이 갱신되어 곧바로 맨 앞으로 온다.
-        // [개선2-메모리] 카드에는 썸네일과 sid만 남기고, 실제 세션 데이터는
-        //   '클릭한 순간' 해당 1건만 조회한다.
-        qs.forEach(d => { kb += ((d.data().thumbImageData || '').length) / 1024; });
 
         qs.forEach(docSnap => {
           const data = docSnap.data();
@@ -2625,11 +2513,7 @@
             try {
               statusMsg.textContent = '데이터 불러오는 중...'; statusMsg.style.color = '#f59e0b';
               const snap = await window.fsGetDoc(window.fsDoc(window.fbDb, 'sessions', sid));
-              if (!snap.exists()) {
-                // 원본은 지워졌는데 인덱스만 남은 경우 — 인덱스도 함께 정리한다.
-                try { await window.fsDeleteDoc(window.fsDoc(window.fbDb, GALLERY_INDEX_COL, sid)); } catch (_) { }
-                alert('해당 데이터를 찾을 수 없습니다. (삭제되었을 수 있음)'); await loadGallery(); return;
-              }
+              if (!snap.exists()) { alert('해당 데이터를 찾을 수 없습니다. (삭제되었을 수 있음)'); await loadGallery(); return; }
               loadSessionForEdit(sid, snap.data());
             } catch (err) {
               console.error(err); alert('데이터 불러오기에 실패했습니다.');
@@ -2641,22 +2525,8 @@
           });
           gallery.appendChild(card);
         });
-
-        // [개선] 저장된 세션을 다시 여는 데에는 AI 모델이 전혀 필요 없다
-        //   (loadSessionForEdit는 저장된 좌표를 그려 줄 뿐이다).
-        //   그런데 기존에는 AI 준비가 끝날 때까지 목록 클릭이 막혀 있어서,
-        //   Firestore가 아무리 빨라도 사용자는 AI 워밍업 시간만큼 기다려야 했다.
-        //   이제 목록이 그려지는 즉시 잠금을 푼다.
-        unlockGallery();
-        if (window.scheduleAI) window.scheduleAI();   // 목록이 다 뜬 뒤에 AI 다운로드 시작
-
-        console.info(
-          `[갤러리] 완료 ${ms()}ms — 인덱스 조회 ${tQuery}ms / 재생성 ${tRebuild}ms / ` +
-          `${qs.size}건 · 약 ${kb.toFixed(0)}KB · 페이지 시작 후 ${Math.round(performance.now())}ms`
-        );
       } catch (err) {
         console.error('[갤러리] 로드 실패', err);
-        // 원인 파악이 가능하도록 실제 오류 코드/메시지를 화면에도 노출한다.
         const detail = (err && (err.code || err.message)) ? String(err.code || err.message) : '알 수 없는 오류';
         gallery.innerHTML =
           '<p style="color:red;font-size:13px;">데이터를 불러오는 데 실패했습니다.<br>' +
@@ -2710,8 +2580,6 @@
         statusMsg.textContent = 'DB 삭제 처리 중...'; statusMsg.style.color = '#f59e0b';
 
         await window.fsDeleteDoc(window.fsDoc(window.fbDb, 'sessions', sessionId));
-        // [필수] 인덱스를 지우지 않으면 삭제한 세션이 목록에 계속 남는다.
-        try { await window.fsDeleteDoc(window.fsDoc(window.fbDb, GALLERY_INDEX_COL, sessionId)); } catch (_) { }
 
         if (currentEditSessionId === sessionId) {
           resetAll(); img = new Image(); drawAll(); notify3D();
@@ -2722,7 +2590,7 @@
         console.error(err); alert('삭제 중 오류가 발생했습니다.');
         statusMsg.textContent = '삭제 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
-        if (fileBtn) fileBtn.disabled = false;   // 클릭 시점에 ensureAI()가 처리
+        if (fileBtn) fileBtn.disabled = !window._aiReady;   // [개선5] AI 준비 상태 반영
         if (saveDbBtn) saveDbBtn.disabled = false;
         c2.style.pointerEvents = 'auto'; c2.style.opacity = '1';
       }
