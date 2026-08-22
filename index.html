@@ -878,137 +878,172 @@
     }
 
     async function initAI() {
+      // [초고속 초기화] 핵심 원칙
+      // 1) 최초 사용 가능한 모델은 256 MultiPose로 즉시 준비한다.
+      // 2) AI Ready를 고정밀 모델(512/Thunder/ROI) 전체 준비와 분리한다.
+      // 3) 고정밀 모델과 셰이더 워밍업은 Ready 이후 백그라운드에서 진행한다.
+      // 4) 기존 분석/DB/3D/각도 계산 코드는 변경하지 않는다.
       try {
         initProg.reset();
         initProg.stage(12, 'AI 백엔드 초기화 중');
-        await new Promise(r => setTimeout(r, 30));   // 첫 표시가 화면에 먼저 그려지도록 양보
+        await new Promise(r => setTimeout(r, 30));
 
-        // [개선-핵심] WebGL(GPU) 백엔드 우선 사용 — CPU 백엔드 대비 추론 10~30배 고속.
-        // [수정] tfjs는 기본값으로 failIfMajorPerformanceCaveat=true를 걸고 컨텍스트를 만든다.
-        //   GPU 가속이 꺼져 있거나 드라이버가 차단 목록에 있으면 브라우저가 소프트웨어
-        //   렌더링(SwiftShader)으로 넘기는데, 이 플래그 때문에 tfjs는 그것을 아예 거부하고
-        //   'Could not get context for WebGL version 2/1'을 남기며 CPU로 떨어진다.
-        //   three.js는 이 플래그를 쓰지 않아 3D 화면만 멀쩡히 뜨는 착시가 생긴다.
-        //   플래그를 꺼서 소프트웨어 WebGL이라도 쓰게 한다(대개 CPU 백엔드보다 빠르다).
         try { tf.env().set('WEBGL_FAIL_IF_MAJOR_PERFORMANCE_CAVEAT', false); } catch (e) { }
 
-        // [수정] setBackend는 실패해도 예외를 던지지 않고 false를 반환한다.
-        //   기존 코드는 try/catch만 봐서, 실제로는 CPU로 떨어졌는데도 'webgl'로 기록했다.
         let backend = 'cpu';
         try {
           const ok = await tf.setBackend('webgl');
           await tf.ready();
           backend = (ok !== false && tf.getBackend() === 'webgl') ? 'webgl' : tf.getBackend();
         } catch (e) { backend = ''; }
+
         if (backend !== 'webgl') {
-          console.warn('[AI] WebGL 백엔드를 쓸 수 없어 CPU로 동작합니다 — 추론이 10배 이상 느려집니다. ' +
-            '브라우저 설정에서 하드웨어 가속을 켜고 chrome://gpu 를 확인해 보세요.');
+          console.warn('[AI] WebGL 백엔드를 쓸 수 없어 CPU로 동작합니다.');
           await tf.setBackend('cpu'); await tf.ready(); backend = 'cpu';
         }
         console.info('[AI] 실제 백엔드:', tf.getBackend());
 
-        // [개선4] WEBGL_DELETE_TEXTURE_THRESHOLD=0 (텍스처 즉시 해제) 설정 '제거'.
-        //   512 해상도의 가변 입력과 결합 시 매 추론마다 텍스처 재할당이 폭주해
-        //   메인 스레드가 수 초씩 멈추는 '대기' 대화상자의 원인이 되어 원복했다.
-        //   (메모리 이득은 소폭 포기 — 나머지 메모리 개선은 모두 유지)
-
-        // [개선4] 소프트웨어 렌더링이면 즉시 경량 프로파일로
+        // 소프트웨어 WebGL/CPU 환경은 경량 프로파일로 고정.
         if (backend !== 'webgl' || isSoftwareGL()) perfProfile = 'lo';
         window._perfProfile = perfProfile;
 
-        initProg.stage(65, '자세 인식 모델 다운로드 중');
-        detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
+        // ─────────────────────────────────────────────────────────────
+        // [초고속 핵심 1] 최초 READY 모델
+        // 기존: hi 환경에서 512 모델이 완전히 준비될 때까지 initAI가 대기
+        // 변경: 256 MultiPose를 먼저 생성하고 즉시 사용 가능 상태로 전환
+        // ─────────────────────────────────────────────────────────────
+        initProg.stage(65, '경량 AI 모델 준비 중');
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet,
           {
             modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-            // [개선2-핵심] hi 프로파일: 내부 입력 해상도 256 → 512 (작게 찍힌 인물 미감지 대폭 감소)
-            // [개선4] lo 프로파일: 원본과 동일한 256 유지 — 느린 환경에서 브라우저 멈춤 방지
-            multiPoseMaxDimension: (perfProfile === 'hi') ? 512 : 256,
-            // [개선2] 저신뢰 인물도 일단 후보로 수용 — 최종 무효 판정은 기존의
-            //   '각도가 하나도 계산되지 않은 감지 제외' 필터가 담당하므로 오탐 증가 없음
+            multiPoseMaxDimension: 256,
             minPoseScore: 0.15
-          });
-
-        // [개선] 고정밀 Thunder 모델은 백그라운드로 병행 로드 — 준비되기 전엔 MultiPose 결과 그대로 사용
-        // [개선8] 생성 Promise를 보관 — analyzeROI가 '준비 완료'를 기다릴 수 있게 한다.
-        window._thunderP = poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
-          { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER })
-          .then(d => { detectorSingle = d; console.log('[AI] Thunder 고정밀 모델 준비 완료'); })
-          .catch(() => { });
-
-        // [개선7-핵심] ROI 전용 MultiPose 256 감지기 — 원본 코드가 영역 추가에서 잘 되던 동작을 복원.
-        //   hi 프로파일에서만 별도 생성(메모리 소폭 증가 트레이드오프),
-        //   lo 프로파일에서는 메인 감지기가 이미 256이므로 그대로 공유.
-        if (perfProfile === 'hi') {
-          window._roiDetP = poseDetection.createDetector(poseDetection.SupportedModels.MoveNet,
-            { modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING, multiPoseMaxDimension: 256, minPoseScore: 0.15 })
-            .then(d => { detectorROI = d; console.log('[AI] ROI 전용 256 감지기 준비 완료'); })
-            .catch(() => { });
-        } else {
-          detectorROI = null;   // lo: detectMerged가 메인(256) 감지기를 사용
-        }
-
-        // [개선] 워밍업 — WebGL 셰이더를 미리 컴파일해 첫 분석의 지연 제거
-        // [개선4] 워밍업 소요시간을 측정해, hi 프로파일인데도 5초를 넘기면
-        //   '셰이더 컴파일이 비정상적으로 느린 환경'으로 기록 → 다음 실행부터 자동으로 lo 시작
-        initProg.stage(97, 'GPU 셰이더 컴파일 중');
-        try {
-          const wc = document.createElement('canvas'); wc.width = wc.height = 64;
-          const tw = performance.now();
-          await detector.estimatePoses(wc, { maxPoses: 1 });
-          const warmMs = performance.now() - tw;
-          wc.width = wc.height = 0;
-          console.log(`[AI] 워밍업 ${Math.round(warmMs)}ms (프로파일: ${perfProfile})`);
-          if (perfProfile === 'hi' && warmMs > 5000) {
-            try { localStorage.setItem('poseai_perf', 'lo'); } catch (e) { }
-            console.warn('[AI] 이 환경은 초기 컴파일이 매우 느림 — 다음 실행부터 경량 모드(256)로 시작합니다.');
           }
+        );
+
+        // 최초 모델의 최소 워밍업만 수행한다.
+        // 고비용 512/Thunder/ROI 워밍업은 READY 이후로 이동한다.
+        try {
+          const wc = document.createElement('canvas');
+          wc.width = wc.height = 32;
+          await detector.estimatePoses(wc, { maxPoses: 1 });
+          wc.width = wc.height = 0;
         } catch (e) { }
 
-        initProg.stop();   // [개선6] 진행률 타이머 정지 후 완료 표시(100% 도달)
-        // 백엔드·프로파일 표기는 화면에서 빼고 콘솔에만 남긴다(문제 추적용).
-        console.info(`[AI] 준비 완료 — 백엔드 ${backend.toUpperCase()} · 프로파일 ${perfProfile}`);
-        statusMsg.textContent = '✅ 준비 완료 100% — 이미지를 선택하세요';
+        // ─────────────────────────────────────────────────────────────
+        // [초고속 핵심 2] 여기서 AI READY
+        // 사용자는 더 이상 512/Thunder/ROI 초기화를 기다리지 않는다.
+        // ─────────────────────────────────────────────────────────────
+        initProg.stop();
+        console.info(`[AI] 빠른 준비 완료 — 백엔드 ${backend.toUpperCase()} · 초기 모델 256`);
+        statusMsg.textContent = '✅ AI 준비 완료 — 이미지를 선택하세요';
         statusMsg.style.color = '#22c55e';
 
-        // [개선5] AI 준비 완료 → 이미지 선택 활성화.
-        //   기존의 '2.5초 기다렸다 재시도' 임시방편을 대체하는 근본 구조.
         window._aiReady = true;
         const fb = document.getElementById('fileBtn');
         if (fb) { fb.disabled = false; fb.textContent = '이미지 선택'; }
-
-        // [개선10] 갤러리 로드는 이제 페이지 시작 즉시(AI 초기화와 병렬로) 시작된다 — 아래 waitFirebase 참조.
-        //   AI 초기화 동안 목록이 비어 보여 '서버 장애'로 오해되는 문제가 네트워크 경쟁보다 크다고 판단.
-        // [개선12] AI 준비 완료 → 갤러리 선택 잠금 해제 (목록은 처음부터 보이되, 준비 전엔 클릭 불가였음)
         unlockGallery();
 
-        // [개선9] 보조 감지기(Thunder · ROI 256) 사전 워밍업.
-        //   셰이더 컴파일은 각 모델의 '첫 추론' 때 일어나므로, 기존에는 첫 '영역 추가' 순간에
-        //   두 모델의 컴파일이 한꺼번에 몰려 '대기(응답 없음)' 창의 원인이 됐다.
-        //   준비 완료 직후의 유휴 시간에 하나씩(사이에 화면 양보를 끼워) 미리 컴파일해 둔다.
-        setTimeout(async () => {
+        // ─────────────────────────────────────────────────────────────
+        // [초고속 핵심 3] 고정밀 모델은 READY 이후 순차 백그라운드 로딩
+        // 동시에 3개 모델을 생성하지 않아 초기 화면의 메인 스레드 경합을 줄인다.
+        // ─────────────────────────────────────────────────────────────
+        const idle = (fn, delay) => setTimeout(fn, delay);
+
+        // 1단계: 고해상도 512 MultiPose를 백그라운드에서 준비.
+        // 준비가 끝나면 이후 전체 이미지 분석부터 자동으로 고정밀 detector 사용.
+        idle(async () => {
           try {
-            const wc = document.createElement('canvas'); wc.width = wc.height = 64;
-            if (window._thunderP) await window._thunderP;
-            if (detectorSingle) {
-              await detectorSingle.estimatePoses(wc, { maxPoses: 1 });
-              console.log('[AI] Thunder 사전 워밍업 완료');
-            }
-            await paintYield();
-            if (window._roiDetP) await window._roiDetP;
-            if (detectorROI) {
-              await detectorROI.estimatePoses(wc, { maxPoses: 1 });
-              console.log('[AI] ROI 감지기 사전 워밍업 완료');
-            }
-            wc.width = wc.height = 0;
+            if (perfProfile !== 'hi') return;
+            const hiP = poseDetection.createDetector(
+              poseDetection.SupportedModels.MoveNet,
+              {
+                modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+                multiPoseMaxDimension: 512,
+                minPoseScore: 0.15
+              }
+            );
+            const hiDetector = await hiP;
+
+            // 512 최초 셰이더 컴파일도 백그라운드에서 처리.
+            try {
+              const wc = document.createElement('canvas');
+              wc.width = wc.height = 32;
+              const tw = performance.now();
+              await hiDetector.estimatePoses(wc, { maxPoses: 1 });
+              const warmMs = performance.now() - tw;
+              wc.width = wc.height = 0;
+              console.log(`[AI] 512 백그라운드 준비 완료 (${Math.round(warmMs)}ms)`);
+              if (warmMs > 5000) {
+                try { localStorage.setItem('poseai_perf', 'lo'); } catch (e) { }
+                console.warn('[AI] 512 초기 컴파일이 느린 환경 — 다음 실행부터 256 경량 모드 유지');
+              }
+            } catch (e) { }
+
+            // 사용 중인 detector를 교체. 현재 실행 중인 분석에는 영향을 주지 않고
+            // 다음 분석부터 고정밀 모델을 사용한다.
+            detector = hiDetector;
+            window._perfProfile = 'hi';
+            console.info('[AI] 고정밀 512 detector 활성화');
+          } catch (e) {
+            console.warn('[AI] 512 백그라운드 로드 실패 — 256 detector 유지', e);
+          }
+        }, 400);
+
+        // 2단계: Thunder — ROI/개별 인물 정밀화용
+        idle(async () => {
+          try {
+            window._thunderP = poseDetection.createDetector(
+              poseDetection.SupportedModels.MoveNet,
+              { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
+            ).then(d => {
+              detectorSingle = d;
+              console.log('[AI] Thunder 백그라운드 준비 완료');
+              return d;
+            }).catch(e => {
+              console.warn('[AI] Thunder 백그라운드 로드 실패', e);
+              return null;
+            });
+
+            // 기존의 analyzeROI 호환성을 위해 Promise를 그대로 유지한다.
+            await window._thunderP;
           } catch (e) { }
-        }, 800);
+        }, 900);
+
+        // 3단계: ROI 전용 256 detector
+        idle(async () => {
+          try {
+            if (perfProfile === 'hi') {
+              window._roiDetP = poseDetection.createDetector(
+                poseDetection.SupportedModels.MoveNet,
+                {
+                  modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+                  multiPoseMaxDimension: 256,
+                  minPoseScore: 0.15
+                }
+              ).then(d => {
+                detectorROI = d;
+                console.log('[AI] ROI 전용 256 detector 백그라운드 준비 완료');
+                return d;
+              }).catch(e => {
+                console.warn('[AI] ROI detector 백그라운드 로드 실패', e);
+                return null;
+              });
+            } else {
+              detectorROI = null;
+              window._roiDetP = Promise.resolve(null);
+            }
+            await window._roiDetP;
+          } catch (e) { }
+        }, 1400);
+
       } catch (e) {
-        initProg.stop();   // [개선6] 실패 시 진행률 타이머 정지
-        statusMsg.textContent = '❌ AI 오류 (콘솔 확인)'; console.error(e);
+        initProg.stop();
+        statusMsg.textContent = '❌ AI 오류 (콘솔 확인)';
+        console.error(e);
         const fb = document.getElementById('fileBtn');
         if (fb) fb.textContent = 'AI 초기화 실패';
-        // [개선12] AI 실패 시에도 갤러리 잠금은 해제 — 저장 기록 '열람·편집'은 AI 없이도 가능하기 때문.
-        //   (AI가 필요한 것은 신규 이미지 분석뿐이며, 그 경로는 fileBtn이 계속 막고 있음)
         unlockGallery();
       }
     }
