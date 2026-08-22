@@ -8,6 +8,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@4.15.0/dist/tf-backend-cpu.min.js"></script>
   <!-- [개선] GPU(WebGL) 백엔드 — CPU 대비 포즈 추론 10~30배 고속 -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.15.0/dist/tf-backend-webgl.min.js"></script>
+  <!-- [초기화 단축] WASM 백엔드 — WebGL을 못 쓸 때의 폴백.
+       CPU 백엔드보다 통상 5~10배 빠르고, 결정적으로 GPU 셰이더 컴파일 단계가 없어
+       초기화에서 가장 오래 걸리던 '워밍업' 구간이 통째로 사라진다.
+       WebGL이 정상이면 이 파일은 내려받기만 하고 실제로 쓰이지 않는다. -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.15.0/dist/tf-backend-wasm.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
   <!-- [콜드 스타트 개선] DNS·TLS 핸드셰이크를 미리 끝내 둔다.
@@ -877,6 +882,74 @@
       if (p) p.classList.remove('gallery-locked');
     }
 
+    /* =====================================================================
+       [초기화 단축] 모델 경로 · 브라우저 영구 캐시
+       -------------------------------------------------------------------
+       (1) 리다이렉트 제거
+           pose-detection의 기본 모델 주소는 tfhub.dev인데, 이 주소는 파일을
+           직접 주지 않고 kaggle.com을 거쳐 storage.googleapis.com으로 넘긴다.
+           서로 다른 도메인 3곳에 DNS 조회와 TLS 핸드셰이크를 하게 되어
+           첫 방문에서 수백 ms~1초 이상이 그냥 날아간다.
+           아래 MODEL_URLS는 최종 목적지를 직접 가리킨다.
+       (2) IndexedDB 영구 캐시
+           HTTP 캐시는 브라우저가 임의로 비운다. 한 번 받은 모델을 IndexedDB에
+           저장해 두면 두 번째 방문부터 네트워크 요청이 0이 된다.
+       (3) 자체 호스팅 훅
+           LOCAL_MODEL_BASE에 경로를 넣으면 그쪽을 먼저 쓴다. 모델 파일을
+           서버에 복사해 두면 같은 출처가 되어 가장 빠르다.
+       ※ 어느 단계에서 실패하든 기존 기본 경로로 자동 복귀하므로,
+         모델 로딩 자체가 실패하는 일은 없다.
+    ===================================================================== */
+    const LOCAL_MODEL_BASE = '';   // 예: './models/'  (비워 두면 원격 사용)
+    const MODEL_URLS = {
+      multipose: 'https://storage.googleapis.com/tfhub-tfjs-modules/google/tfjs-model/movenet/multipose/lightning/1/model.json',
+      thunder: 'https://storage.googleapis.com/tfhub-tfjs-modules/google/tfjs-model/movenet/singlepose/thunder/4/model.json'
+    };
+
+    function remoteModelUrl(kind) {
+      if (LOCAL_MODEL_BASE) return `${LOCAL_MODEL_BASE}${kind}/model.json`;
+      return MODEL_URLS[kind];
+    }
+
+    // 캐시에 있으면 indexeddb:// 경로를, 없으면 원격 경로를 돌려준다.
+    async function resolveModelUrl(kind) {
+      const key = `indexeddb://movenet-${kind}`;
+      try {
+        const listed = await tf.io.listModels();
+        if (listed[key]) { console.info(`[AI] ${kind} 모델을 브라우저 캐시에서 사용합니다`); return key; }
+      } catch (e) { }
+      return remoteModelUrl(kind);
+    }
+
+    // 처음 받은 모델을 IndexedDB에 저장해 둔다(다음 방문부터 다운로드 0).
+    // 화면을 막지 않도록 백그라운드에서만 호출한다.
+    async function cacheModel(kind) {
+      const key = `indexeddb://movenet-${kind}`;
+      try {
+        const listed = await tf.io.listModels();
+        if (listed[key]) return;
+        const m = await tf.loadGraphModel(remoteModelUrl(kind));
+        await m.save(key);
+        m.dispose();
+        console.info(`[AI] ${kind} 모델을 브라우저에 저장했습니다 — 다음 실행부터 즉시 로딩`);
+      } catch (e) {
+        console.warn(`[AI] ${kind} 모델 캐시 실패(동작에는 지장 없음)`, e);
+      }
+    }
+
+    // MoveNet 생성 공통 래퍼 — 지정 경로로 시도하고, 실패하면 기본 경로로 재시도.
+    async function createMoveNet(cfg, kind) {
+      try {
+        const url = await resolveModelUrl(kind);
+        return await poseDetection.createDetector(
+          poseDetection.SupportedModels.MoveNet, Object.assign({}, cfg, { modelUrl: url })
+        );
+      } catch (e) {
+        console.warn(`[AI] ${kind} 지정 경로 로딩 실패 — 기본 경로로 재시도합니다.`, e);
+        return await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
+      }
+    }
+
     async function initAI() {
       // [초고속 초기화] 핵심 원칙
       // 1) 최초 사용 가능한 모델은 256 MultiPose로 즉시 준비한다.
@@ -897,13 +970,26 @@
           backend = (ok !== false && tf.getBackend() === 'webgl') ? 'webgl' : tf.getBackend();
         } catch (e) { backend = ''; }
 
+        // [초기화 단축] WebGL 실패 시 곧장 CPU로 떨어지지 않고 WASM을 먼저 시도한다.
+        //   CPU 백엔드는 순수 자바스크립트 연산이라 매우 느리고,
+        //   WASM은 SIMD를 쓰는 데다 셰이더 컴파일 단계가 아예 없다.
         if (backend !== 'webgl') {
-          console.warn('[AI] WebGL 백엔드를 쓸 수 없어 CPU로 동작합니다.');
+          try {
+            if (tf.wasm && tf.wasm.setWasmPaths) {
+              tf.wasm.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.15.0/dist/');
+            }
+            const okw = await tf.setBackend('wasm');
+            await tf.ready();
+            if (okw !== false && tf.getBackend() === 'wasm') backend = 'wasm';
+          } catch (e) { }
+        }
+        if (backend !== 'webgl' && backend !== 'wasm') {
+          console.warn('[AI] WebGL·WASM 모두 사용할 수 없어 CPU로 동작합니다.');
           await tf.setBackend('cpu'); await tf.ready(); backend = 'cpu';
         }
         console.info('[AI] 실제 백엔드:', tf.getBackend());
 
-        // 소프트웨어 WebGL/CPU 환경은 경량 프로파일로 고정.
+        // 소프트웨어 WebGL·WASM·CPU 환경은 경량 프로파일로 고정.
         if (backend !== 'webgl' || isSoftwareGL()) perfProfile = 'lo';
         window._perfProfile = perfProfile;
 
@@ -913,14 +999,11 @@
         // 변경: 256 MultiPose를 먼저 생성하고 즉시 사용 가능 상태로 전환
         // ─────────────────────────────────────────────────────────────
         initProg.stage(65, '경량 AI 모델 준비 중');
-        detector = await poseDetection.createDetector(
-          poseDetection.SupportedModels.MoveNet,
-          {
-            modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-            multiPoseMaxDimension: 256,
-            minPoseScore: 0.15
-          }
-        );
+        detector = await createMoveNet({
+          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+          multiPoseMaxDimension: 256,
+          minPoseScore: 0.15
+        }, 'multipose');
 
         // 최초 모델의 최소 워밍업만 수행한다.
         // 고비용 512/Thunder/ROI 워밍업은 READY 이후로 이동한다.
@@ -951,20 +1034,22 @@
         // ─────────────────────────────────────────────────────────────
         const idle = (fn, delay) => setTimeout(fn, delay);
 
+        // [초기화 단축] READY 이후 유휴 시간에 모델을 IndexedDB로 복사해 둔다.
+        //   이번 실행 속도에는 영향이 없고, 다음 실행부터 다운로드가 사라진다.
+        idle(() => { cacheModel('multipose'); }, 2500);
+        idle(() => { cacheModel('thunder'); }, 6000);
+
         // 1단계: 고해상도 512 MultiPose를 백그라운드에서 준비.
         // 준비가 끝나면 이후 전체 이미지 분석부터 자동으로 고정밀 detector 사용.
         idle(async () => {
           try {
             if (perfProfile !== 'hi') return;
-            const hiP = poseDetection.createDetector(
-              poseDetection.SupportedModels.MoveNet,
-              {
-                modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-                multiPoseMaxDimension: 512,
-                minPoseScore: 0.15
-              }
-            );
-            const hiDetector = await hiP;
+            // 512는 256과 같은 모델 파일을 쓰므로 캐시가 그대로 재사용된다.
+            const hiDetector = await createMoveNet({
+              modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+              multiPoseMaxDimension: 512,
+              minPoseScore: 0.15
+            }, 'multipose');
 
             // 512 최초 셰이더 컴파일도 백그라운드에서 처리.
             try {
@@ -994,9 +1079,8 @@
         // 2단계: Thunder — ROI/개별 인물 정밀화용
         idle(async () => {
           try {
-            window._thunderP = poseDetection.createDetector(
-              poseDetection.SupportedModels.MoveNet,
-              { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
+            window._thunderP = createMoveNet(
+              { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }, 'thunder'
             ).then(d => {
               detectorSingle = d;
               console.log('[AI] Thunder 백그라운드 준비 완료');
@@ -1015,14 +1099,11 @@
         idle(async () => {
           try {
             if (perfProfile === 'hi') {
-              window._roiDetP = poseDetection.createDetector(
-                poseDetection.SupportedModels.MoveNet,
-                {
-                  modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-                  multiPoseMaxDimension: 256,
-                  minPoseScore: 0.15
-                }
-              ).then(d => {
+              window._roiDetP = createMoveNet({
+                modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+                multiPoseMaxDimension: 256,
+                minPoseScore: 0.15
+              }, 'multipose').then(d => {
                 detectorROI = d;
                 console.log('[AI] ROI 전용 256 detector 백그라운드 준비 완료');
                 return d;
