@@ -20,6 +20,7 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://storage.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://tfhub.dev" crossorigin>
+  <link rel="preconnect" href="https://www.kaggle.com" crossorigin>
   <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -885,50 +886,47 @@
     /* =====================================================================
        [초기화 단축] 모델 경로 · 브라우저 영구 캐시
        -------------------------------------------------------------------
-       (1) 리다이렉트 제거
-           pose-detection의 기본 모델 주소는 tfhub.dev인데, 이 주소는 파일을
-           직접 주지 않고 kaggle.com을 거쳐 storage.googleapis.com으로 넘긴다.
-           서로 다른 도메인 3곳에 DNS 조회와 TLS 핸드셰이크를 하게 되어
-           첫 방문에서 수백 ms~1초 이상이 그냥 날아간다.
-           아래 MODEL_URLS는 최종 목적지를 직접 가리킨다.
-       (2) IndexedDB 영구 캐시
+       (1) IndexedDB 영구 캐시
            HTTP 캐시는 브라우저가 임의로 비운다. 한 번 받은 모델을 IndexedDB에
            저장해 두면 두 번째 방문부터 네트워크 요청이 0이 된다.
-       (3) 자체 호스팅 훅
+       (2) 자체 호스팅 훅
            LOCAL_MODEL_BASE에 경로를 넣으면 그쪽을 먼저 쓴다. 모델 파일을
            서버에 복사해 두면 같은 출처가 되어 가장 빠르다.
        ※ 어느 단계에서 실패하든 기존 기본 경로로 자동 복귀하므로,
          모델 로딩 자체가 실패하는 일은 없다.
     ===================================================================== */
-    const LOCAL_MODEL_BASE = '';   // 예: './models/'  (비워 두면 원격 사용)
-    const MODEL_URLS = {
-      multipose: 'https://storage.googleapis.com/tfhub-tfjs-modules/google/tfjs-model/movenet/multipose/lightning/1/model.json',
-      thunder: 'https://storage.googleapis.com/tfhub-tfjs-modules/google/tfjs-model/movenet/singlepose/thunder/4/model.json'
+    const LOCAL_MODEL_BASE = '';   // 예: './models/'  (비워 두면 아래 기본 경로 사용)
+
+    // [수정] storage.googleapis.com 직접 경로는 403(비공개)이라 쓸 수 없다.
+    //   라이브러리가 원래 쓰는 tfhub 주소를 그대로 사용한다.
+    //   리다이렉트 제거는 포기하지만, 아래 IndexedDB 캐시가 그보다 훨씬 큰 효과를 낸다
+    //   (두 번째 실행부터 네트워크 요청 자체가 사라지므로 리다이렉트도 함께 사라진다).
+    const MODEL_TFHUB = {
+      multipose: 'https://tfhub.dev/google/tfjs-model/movenet/multipose/lightning/1',
+      thunder: 'https://tfhub.dev/google/tfjs-model/movenet/singlepose/thunder/4'
     };
 
-    function remoteModelUrl(kind) {
-      if (LOCAL_MODEL_BASE) return `${LOCAL_MODEL_BASE}${kind}/model.json`;
-      return MODEL_URLS[kind];
-    }
-
-    // 캐시에 있으면 indexeddb:// 경로를, 없으면 원격 경로를 돌려준다.
+    // 캐시가 있으면 indexeddb:// 경로를, 자체 호스팅을 켜 두었으면 그 경로를,
+    // 둘 다 아니면 null(= 라이브러리 기본 경로 사용)을 돌려준다.
     async function resolveModelUrl(kind) {
       const key = `indexeddb://movenet-${kind}`;
       try {
         const listed = await tf.io.listModels();
         if (listed[key]) { console.info(`[AI] ${kind} 모델을 브라우저 캐시에서 사용합니다`); return key; }
       } catch (e) { }
-      return remoteModelUrl(kind);
+      if (LOCAL_MODEL_BASE) return `${LOCAL_MODEL_BASE}${kind}/model.json`;
+      return null;
     }
 
     // 처음 받은 모델을 IndexedDB에 저장해 둔다(다음 방문부터 다운로드 0).
-    // 화면을 막지 않도록 백그라운드에서만 호출한다.
+    // 화면을 막지 않도록 READY 이후 백그라운드에서만 호출한다.
     async function cacheModel(kind) {
       const key = `indexeddb://movenet-${kind}`;
       try {
         const listed = await tf.io.listModels();
         if (listed[key]) return;
-        const m = await tf.loadGraphModel(remoteModelUrl(kind));
+        const src = LOCAL_MODEL_BASE ? `${LOCAL_MODEL_BASE}${kind}/model.json` : MODEL_TFHUB[kind];
+        const m = await tf.loadGraphModel(src, { fromTFHub: !LOCAL_MODEL_BASE });
         await m.save(key);
         m.dispose();
         console.info(`[AI] ${kind} 모델을 브라우저에 저장했습니다 — 다음 실행부터 즉시 로딩`);
@@ -937,17 +935,24 @@
       }
     }
 
-    // MoveNet 생성 공통 래퍼 — 지정 경로로 시도하고, 실패하면 기본 경로로 재시도.
+    // MoveNet 생성 공통 래퍼.
+    //   캐시·자체 호스팅 경로가 있으면 그것으로, 없으면 라이브러리 기본 경로로 만든다.
+    //   지정 경로가 실패하면 기본 경로로 자동 재시도한다.
     async function createMoveNet(cfg, kind) {
-      try {
-        const url = await resolveModelUrl(kind);
-        return await poseDetection.createDetector(
-          poseDetection.SupportedModels.MoveNet, Object.assign({}, cfg, { modelUrl: url })
-        );
-      } catch (e) {
-        console.warn(`[AI] ${kind} 지정 경로 로딩 실패 — 기본 경로로 재시도합니다.`, e);
-        return await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
+      let url = null;
+      try { url = await resolveModelUrl(kind); } catch (e) { }
+      if (url) {
+        try {
+          return await poseDetection.createDetector(
+            poseDetection.SupportedModels.MoveNet, Object.assign({}, cfg, { modelUrl: url })
+          );
+        } catch (e) {
+          console.warn(`[AI] ${kind} 지정 경로 로딩 실패 — 기본 경로로 재시도합니다.`, e);
+          // 깨진 캐시일 수 있으므로 지우고 다음 기회에 다시 만들게 한다.
+          try { await tf.io.removeModel(`indexeddb://movenet-${kind}`); } catch (_) { }
+        }
       }
+      return await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, cfg);
     }
 
     async function initAI() {
