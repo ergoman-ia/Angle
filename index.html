@@ -10,6 +10,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.15.0/dist/tf-backend-webgl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+  <!-- [콜드 스타트 개선] DNS·TLS 핸드셰이크를 미리 끝내 둔다.
+       첫 방문에서 tfjs·모델 가중치·Firebase를 받을 때 왕복 지연이 줄어든다. -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://storage.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://tfhub.dev" crossorigin>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
@@ -536,12 +543,20 @@
        (1) 권장: 로컬 서버(http)로 실행 → 아래 모듈이 secrets.js를 정상 import
        (2) 차선: secrets.js를 `window.FIREBASE_CONFIG = {...};` 형태로 바꾸면
            아래 일반 스크립트가 file://에서도 읽어들임 (export 문법이면 이 태그는 무해한 콘솔 오류만 남김) -->
-  <script src="./secrets.js"></script>
+  <!-- [수정] secrets.js가 `export ...` 문법이면 이 일반 스크립트 태그가
+       'Unexpected token export' 오류를 남긴다(동작에는 무해하지만 콘솔이 지저분해진다).
+       http로 실행 중이면 아래 모듈이 import로 정상 처리하므로 이 태그가 필요 없다.
+       file://로 직접 열었을 때만 읽어들이도록 조건부로 바꾼다. -->
+  <script>
+    if (location.protocol === 'file:') {
+      document.write('<script src="./secrets.js"><\/script>');
+    }
+  </script>
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
     import {
       getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
-      collection, getDocs, query, orderBy, limit, serverTimestamp
+      collection, getDocs, query, orderBy, limit, getCountFromServer, serverTimestamp
     }
       from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
 
@@ -569,6 +584,7 @@
         window.fsQuery = query;
         window.fsOrderBy = orderBy;
         window.fsLimit = limit;
+        window.fsGetCount = getCountFromServer;   // 문서를 내려받지 않고 개수만 세는 집계 쿼리
         window.fsServerTimestamp = serverTimestamp;
       } catch (e) { console.error('[Firebase] 초기화 실패 — DB 기능 없이 동작합니다.', e); }
     }
@@ -606,7 +622,7 @@
           <div class="panel panel-gallery gallery-locked" id="galleryPanel">
             <div class="eyebrow">저장 내역(50건 제한) <span class="em">클릭하여 불러오기</span></div>
             <!-- [개선12] AI 준비 전에는 목록은 보이되 선택은 잠금 — 이유를 배지로 안내 -->
-            <div class="gallery-lock-note" id="galleryLockNote">⏳ AI 준비 중 — 완료되면 선택할 수 있습니다</div>
+            <div class="gallery-lock-note" id="galleryLockNote">⏳ 목록 불러오는 중…</div>
             <div class="gallery-viewport">
               <button class="gallery-arrow gallery-arrow-left" id="galleryArrowLeft" type="button" aria-label="이전">‹</button>
               <div class="gallery-container" id="galleryContainer">
@@ -867,11 +883,29 @@
         initProg.stage(12, 'AI 백엔드 초기화 중');
         await new Promise(r => setTimeout(r, 30));   // 첫 표시가 화면에 먼저 그려지도록 양보
 
-        // [개선-핵심] WebGL(GPU) 백엔드 우선 사용 — 기존 CPU 백엔드 대비 추론 10~30배 고속.
-        //             WebGL 미지원 환경(구형 브라우저 등)에서만 CPU로 자동 폴백.
-        let backend = 'webgl';
-        try { await tf.setBackend('webgl'); await tf.ready(); }
-        catch (e) { backend = 'cpu'; await tf.setBackend('cpu'); await tf.ready(); }
+        // [개선-핵심] WebGL(GPU) 백엔드 우선 사용 — CPU 백엔드 대비 추론 10~30배 고속.
+        // [수정] tfjs는 기본값으로 failIfMajorPerformanceCaveat=true를 걸고 컨텍스트를 만든다.
+        //   GPU 가속이 꺼져 있거나 드라이버가 차단 목록에 있으면 브라우저가 소프트웨어
+        //   렌더링(SwiftShader)으로 넘기는데, 이 플래그 때문에 tfjs는 그것을 아예 거부하고
+        //   'Could not get context for WebGL version 2/1'을 남기며 CPU로 떨어진다.
+        //   three.js는 이 플래그를 쓰지 않아 3D 화면만 멀쩡히 뜨는 착시가 생긴다.
+        //   플래그를 꺼서 소프트웨어 WebGL이라도 쓰게 한다(대개 CPU 백엔드보다 빠르다).
+        try { tf.env().set('WEBGL_FAIL_IF_MAJOR_PERFORMANCE_CAVEAT', false); } catch (e) { }
+
+        // [수정] setBackend는 실패해도 예외를 던지지 않고 false를 반환한다.
+        //   기존 코드는 try/catch만 봐서, 실제로는 CPU로 떨어졌는데도 'webgl'로 기록했다.
+        let backend = 'cpu';
+        try {
+          const ok = await tf.setBackend('webgl');
+          await tf.ready();
+          backend = (ok !== false && tf.getBackend() === 'webgl') ? 'webgl' : tf.getBackend();
+        } catch (e) { backend = ''; }
+        if (backend !== 'webgl') {
+          console.warn('[AI] WebGL 백엔드를 쓸 수 없어 CPU로 동작합니다 — 추론이 10배 이상 느려집니다. ' +
+            '브라우저 설정에서 하드웨어 가속을 켜고 chrome://gpu 를 확인해 보세요.');
+          await tf.setBackend('cpu'); await tf.ready(); backend = 'cpu';
+        }
+        console.info('[AI] 실제 백엔드:', tf.getBackend());
 
         // [개선4] WEBGL_DELETE_TEXTURE_THRESHOLD=0 (텍스처 즉시 해제) 설정 '제거'.
         //   512 해상도의 가변 입력과 결합 시 매 추론마다 텍스처 재할당이 폭주해
@@ -931,7 +965,9 @@
         } catch (e) { }
 
         initProg.stop();   // [개선6] 진행률 타이머 정지 후 완료 표시(100% 도달)
-        statusMsg.textContent = `✅ 준비완료 100% (${backend.toUpperCase()}${perfProfile === 'lo' ? ' · 경량 모드' : ' 가속'}) — 이미지를 선택하세요`;
+        // 백엔드·프로파일 표기는 화면에서 빼고 콘솔에만 남긴다(문제 추적용).
+        console.info(`[AI] 준비 완료 — 백엔드 ${backend.toUpperCase()} · 프로파일 ${perfProfile}`);
+        statusMsg.textContent = '✅ 준비 완료 100% — 이미지를 선택하세요';
         statusMsg.style.color = '#22c55e';
 
         // [개선5] AI 준비 완료 → 이미지 선택 활성화.
@@ -976,7 +1012,13 @@
         unlockGallery();
       }
     }
-    initAI();
+
+    // [원복] AI는 페이지가 열리는 즉시, 갤러리 로딩과 '병렬로' 시작한다.
+    //   한때 '필요해질 때 시작'으로 미뤄 봤으나 잘못된 판단이었다.
+    //   미뤄도 총 대기 시간은 그대로이고, 사용자가 버튼을 누른 뒤에 멈춰 서서
+    //   기다리게 되므로 오히려 체감이 나빠진다. 목록을 훑어보는 동안
+    //   배경에서 끝나 있는 편이 낫다.
+    window._aiInitP = initAI();
 
     function drawPlaceholder() {
       ctx.fillStyle = '#f1f4f8'; ctx.fillRect(0, 0, 880, 580);
@@ -1567,6 +1609,8 @@
     // Events
     document.getElementById('addBtn').addEventListener('click', function () {
       if (!img.src || img.width === 0) { alert('이미지 먼저!'); return; }
+      // 목록 잠금은 AI와 분리했으므로, 실제로 AI가 필요한 이 지점에서만 막는다.
+      if (!window._aiReady) { alert('AI 준비 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
       addMode = !addMode;
       if (addMode) { this.classList.add('active'); this.textContent = '취소(ESC)'; c2.style.cursor = 'crosshair'; }
       else { this.classList.remove('active'); this.textContent = '+ 영역 추가'; c2.style.cursor = 'crosshair'; selRect = null; drawAll(); }
@@ -2301,22 +2345,14 @@
         if (isUpdating) {
           payload.updatedAt = window.fsServerTimestamp();
           await window.fsUpdateDoc(docRef, payload);
-          await window.fsSetDoc(window.fsDoc(window.fbDb, 'sessionGalleryIndex', sessionId), {
-            siteName,
-            thumbImageData: compThumb,
-            updatedAt: window.fsServerTimestamp(),
-            createdAt: null
-          }, { merge: true });
+          // [경량 인덱스] 업데이트 시에는 createdAt을 건드리지 않는다.
+          //   merge와 함께 createdAt: null을 보내면 기존 값이 null로 덮여 정렬이 망가진다.
+          await writeGalleryIndex(sessionId, siteName, compThumb, false);
           alert('성공적으로 업데이트 되었습니다.');
         } else {
           payload.createdAt = window.fsServerTimestamp();
           await window.fsSetDoc(docRef, payload);
-          await window.fsSetDoc(window.fsDoc(window.fbDb, 'sessionGalleryIndex', sessionId), {
-            siteName,
-            thumbImageData: compThumb,
-            createdAt: window.fsServerTimestamp(),
-            updatedAt: window.fsServerTimestamp()
-          });
+          await writeGalleryIndex(sessionId, siteName, compThumb, true);
           alert('새 데이터가 DB에 저장 완료되었습니다!');
         }
         statusMsg.textContent = '저장 완료'; statusMsg.style.color = '#22c55e';
@@ -2436,61 +2472,112 @@
     /* =====================================================================
        갤러리 로드 / 불러오기 / 삭제
     ===================================================================== */
+
+    /* =====================================================================
+       [DB 로딩 근본 최적화] 갤러리 전용 경량 인덱스 컬렉션
+       -------------------------------------------------------------------
+       배경: sessions 문서 하나에는 원본·내보내기 이미지가 base64로 들어 있어
+             문서당 최대 ~900KB다. 그런데 갤러리에 필요한 건 썸네일(약 20KB)과
+             현장명뿐이고, Firestore에는 특정 필드만 골라 받는 기능이 없다.
+             따라서 getDocs(sessions)는 개수 제한을 걸든 말든 세션마다 900KB를
+             전부 내려받는다. (세션이 제한보다 적으면 limit은 아무 효과가 없다)
+       방식: 썸네일과 현장명만 담은 별도 컬렉션을 두고 갤러리는 그쪽만 읽는다.
+             내려받는 양이 40배 이상 줄어든다. 실제 세션 데이터는 기존대로
+             카드를 클릭한 순간 해당 1건만 조회한다.
+    ===================================================================== */
+    const GALLERY_INDEX_COL = 'sessionGalleryIndex';
+    const GALLERY_LIMIT = 50;   // 화면에 표시할 최신 세션 수 (이 값만 바꾸면 됨)
+
+    // 저장·업데이트 시 인덱스 문서를 함께 기록한다.
+    // 인덱스 기록이 실패해도 본 저장은 이미 끝났으므로 경고만 남기고 넘어간다.
+    async function writeGalleryIndex(sessionId, siteName, thumbData, isNew) {
+      try {
+        const rec = {
+          siteName: siteName || '미지정',
+          thumbImageData: thumbData || '',
+          updatedAt: window.fsServerTimestamp()
+        };
+        if (isNew) rec.createdAt = window.fsServerTimestamp();
+        await window.fsSetDoc(
+          window.fsDoc(window.fbDb, GALLERY_INDEX_COL, sessionId), rec, { merge: true }
+        );
+      } catch (e) {
+        console.warn('[갤러리] 인덱스 기록 실패 — 다음 목록 열람 때 자동 복구됩니다.', e);
+      }
+    }
+
+    // 인덱스가 없거나 일부만 있는 경우 채워 넣는다.
+    // ※ 개수 제한을 걸지 않는다. 제한을 걸면 그 바깥의 세션은 인덱스가 영영 생기지
+    //   않아 갤러리에서 사라진 것처럼 보인다.
+    async function rebuildGalleryIndex(gallery) {
+      if (gallery) {
+        gallery.innerHTML = '<p style="color:#666;font-size:13px;">목록 인덱스를 만드는 중입니다… ' +
+          '(처음 한 번만 오래 걸리며, 다음부터는 빠르게 열립니다)</p>';
+      }
+      const all = await window.fsGetDocs(window.fsCollection(window.fbDb, 'sessions'));
+      const jobs = [];
+      all.forEach(d => {
+        const v = d.data();
+        const t = v.updatedAt || v.createdAt || null;   // 둘 다 없으면 null (undefined는 쓰기 오류)
+        jobs.push(window.fsSetDoc(
+          window.fsDoc(window.fbDb, GALLERY_INDEX_COL, d.id),
+          {
+            siteName: v.siteName || '미지정',
+            thumbImageData: v.thumbImageData || v.exportImageData || '',
+            createdAt: v.createdAt || t || null,
+            updatedAt: t
+          },
+          { merge: true }
+        ));
+      });
+      // 동시 쓰기 폭주를 막기 위해 20건씩 나눠 보낸다.
+      for (let i = 0; i < jobs.length; i += 20) await Promise.all(jobs.slice(i, i + 20));
+      console.info(`[갤러리] 인덱스 생성 완료 — ${jobs.length}건`);
+    }
+
     async function loadGallery() {
       const gallery = document.getElementById('galleryContainer');
+      // [계측] 어느 구간이 실제로 오래 걸리는지 콘솔에 숫자로 남긴다.
+      const T0 = performance.now();
+      const ms = () => Math.round(performance.now() - T0);
+      let tQuery = 0, tRebuild = 0, kb = 0;
       try {
-        // [DB 로딩 핵심 최적화] 갤러리 전용 경량 인덱스만 조회한다.
-        // 원본 sessions 문서에는 이미지/분석 데이터가 포함되어 있으므로 목록 표시 때 읽지 않는다.
-        const GALLERY_LIMIT = 50;
-        const indexRef = window.fsCollection(window.fbDb, 'sessionGalleryIndex');
-        let qs = null;
+        const indexRef = window.fsCollection(window.fbDb, GALLERY_INDEX_COL);
 
-        if (window.fsQuery && window.fsOrderBy && window.fsLimit) {
-          try {
-            qs = await window.fsGetDocs(
-              window.fsQuery(indexRef, window.fsOrderBy('updatedAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
-            );
-          } catch (qErr) {
-            console.warn('[갤러리] 경량 인덱스 조회 실패', qErr);
-          }
+        // 최신순 정렬은 서버에서 처리한다. updatedAt은 저장·업데이트마다 항상 기록되므로
+        // 별도 색인 설정 없이 동작하고, 수정한 세션이 곧바로 맨 앞으로 온다.
+        const fetchIndex = () => window.fsGetDocs(
+          window.fsQuery(indexRef, window.fsOrderBy('updatedAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
+        );
+
+        let qs = null;
+        try {
+          const q0 = performance.now();
+          qs = await fetchIndex();
+          tQuery = Math.round(performance.now() - q0);
+        } catch (qErr) {
+          console.warn('[갤러리] 경량 인덱스 조회 실패 — 인덱스를 다시 만들어 봅니다.', qErr);
         }
 
-        // 기존에 저장된 sessions가 있고 경량 인덱스가 아직 없는 경우에만
-        // 최초 1회 기존 데이터를 읽어 갤러리 인덱스를 만들어 준다.
-        if (!qs || qs.empty) {
-          const oldCol = window.fsCollection(window.fbDb, 'sessions');
-          let oldQs = null;
-          try {
-            oldQs = await window.fsGetDocs(
-              window.fsQuery(oldCol, window.fsOrderBy('createdAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
-            );
-          } catch (e) {
-            oldQs = await window.fsGetDocs(oldCol);
+        // 인덱스가 실제 세션 수보다 모자라면 채워 넣는다.
+        //   getCountFromServer는 문서를 내려받지 않고 개수만 세므로 비용이 거의 없다.
+        //   집계를 못 쓰는 환경에서는 '인덱스가 비었을 때'만 재생성한다.
+        try {
+          let needRebuild = !qs || qs.empty;
+          if (!needRebuild && window.fsGetCount && qs.size < GALLERY_LIMIT) {
+            const idxCnt = (await window.fsGetCount(indexRef)).data().count;
+            const secCnt = (await window.fsGetCount(window.fsCollection(window.fbDb, 'sessions'))).data().count;
+            needRebuild = idxCnt < secCnt;
           }
-
-          if (!oldQs.empty) {
-            const indexWrites = [];
-            oldQs.forEach(d => {
-              const data = d.data();
-              const t = data.updatedAt || data.createdAt || null;
-              indexWrites.push(
-                window.fsSetDoc(
-                  window.fsDoc(window.fbDb, 'sessionGalleryIndex', d.id),
-                  {
-                    siteName: data.siteName || '미지정',
-                    thumbImageData: data.thumbImageData || data.exportImageData || '',
-                    createdAt: data.createdAt || t || null,
-                    updatedAt: t || data.createdAt || null
-                  }
-                )
-              );
-            });
-            await Promise.all(indexWrites);
-
-            qs = await window.fsGetDocs(
-              window.fsQuery(indexRef, window.fsOrderBy('updatedAt', 'desc'), window.fsLimit(GALLERY_LIMIT))
-            );
+          if (needRebuild) {
+            console.warn('[갤러리] 인덱스 재생성이 실행됩니다 — 이번 로딩은 느립니다.');
+            const r0 = performance.now();
+            await rebuildGalleryIndex(gallery);
+            qs = await fetchIndex();
+            tRebuild = Math.round(performance.now() - r0);
           }
+        } catch (rErr) {
+          console.warn('[갤러리] 인덱스 점검 실패 — 현재 인덱스로 표시합니다.', rErr);
         }
 
         gallery.innerHTML = '';
@@ -2498,6 +2585,12 @@
           gallery.innerHTML = '<p style="color:#666;font-size:13px;">저장된 작업 내역이 없습니다.</p>';
           return;
         }
+        // [개선11] 최신 '저장 또는 업데이트'가 맨 앞(왼쪽)에 오도록 정렬.
+        //   이제 updatedAt 내림차순을 서버가 처리하므로 클라이언트 정렬이 필요 없다.
+        //   수정한 세션은 updatedAt이 갱신되어 곧바로 맨 앞으로 온다.
+        // [개선2-메모리] 카드에는 썸네일과 sid만 남기고, 실제 세션 데이터는
+        //   '클릭한 순간' 해당 1건만 조회한다.
+        qs.forEach(d => { kb += ((d.data().thumbImageData || '').length) / 1024; });
 
         qs.forEach(docSnap => {
           const data = docSnap.data();
@@ -2513,7 +2606,11 @@
             try {
               statusMsg.textContent = '데이터 불러오는 중...'; statusMsg.style.color = '#f59e0b';
               const snap = await window.fsGetDoc(window.fsDoc(window.fbDb, 'sessions', sid));
-              if (!snap.exists()) { alert('해당 데이터를 찾을 수 없습니다. (삭제되었을 수 있음)'); await loadGallery(); return; }
+              if (!snap.exists()) {
+                // 원본은 지워졌는데 인덱스만 남은 경우 — 인덱스도 함께 정리한다.
+                try { await window.fsDeleteDoc(window.fsDoc(window.fbDb, GALLERY_INDEX_COL, sid)); } catch (_) { }
+                alert('해당 데이터를 찾을 수 없습니다. (삭제되었을 수 있음)'); await loadGallery(); return;
+              }
               loadSessionForEdit(sid, snap.data());
             } catch (err) {
               console.error(err); alert('데이터 불러오기에 실패했습니다.');
@@ -2525,8 +2622,21 @@
           });
           gallery.appendChild(card);
         });
+
+        // [개선] 저장된 세션을 다시 여는 데에는 AI 모델이 전혀 필요 없다
+        //   (loadSessionForEdit는 저장된 좌표를 그려 줄 뿐이다).
+        //   그런데 기존에는 AI 준비가 끝날 때까지 목록 클릭이 막혀 있어서,
+        //   Firestore가 아무리 빨라도 사용자는 AI 워밍업 시간만큼 기다려야 했다.
+        //   이제 목록이 그려지는 즉시 잠금을 푼다.
+        unlockGallery();
+
+        console.info(
+          `[갤러리] 완료 ${ms()}ms — 인덱스 조회 ${tQuery}ms / 재생성 ${tRebuild}ms / ` +
+          `${qs.size}건 · 약 ${kb.toFixed(0)}KB · 페이지 시작 후 ${Math.round(performance.now())}ms`
+        );
       } catch (err) {
         console.error('[갤러리] 로드 실패', err);
+        // 원인 파악이 가능하도록 실제 오류 코드/메시지를 화면에도 노출한다.
         const detail = (err && (err.code || err.message)) ? String(err.code || err.message) : '알 수 없는 오류';
         gallery.innerHTML =
           '<p style="color:red;font-size:13px;">데이터를 불러오는 데 실패했습니다.<br>' +
@@ -2580,6 +2690,8 @@
         statusMsg.textContent = 'DB 삭제 처리 중...'; statusMsg.style.color = '#f59e0b';
 
         await window.fsDeleteDoc(window.fsDoc(window.fbDb, 'sessions', sessionId));
+        // [필수] 인덱스를 지우지 않으면 삭제한 세션이 목록에 계속 남는다.
+        try { await window.fsDeleteDoc(window.fsDoc(window.fbDb, GALLERY_INDEX_COL, sessionId)); } catch (_) { }
 
         if (currentEditSessionId === sessionId) {
           resetAll(); img = new Image(); drawAll(); notify3D();
