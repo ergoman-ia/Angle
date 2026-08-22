@@ -628,7 +628,7 @@
           <div class="panel panel-gallery gallery-locked" id="galleryPanel">
             <div class="eyebrow">저장 내역(50건 제한) <span class="em">클릭하여 불러오기</span></div>
             <!-- [개선12] AI 준비 전에는 목록은 보이되 선택은 잠금 — 이유를 배지로 안내 -->
-            <div class="gallery-lock-note" id="galleryLockNote">⏳ 목록 불러오는 중…</div>
+            <div class="gallery-lock-note" id="galleryLockNote">⏳ AI 모델 준비 중 — 완료되면 선택할 수 있습니다</div>
             <div class="gallery-viewport">
               <button class="gallery-arrow gallery-arrow-left" id="galleryArrowLeft" type="button" aria-label="이전">‹</button>
               <div class="gallery-container" id="galleryContainer">
@@ -1730,7 +1730,7 @@
     // Events
     document.getElementById('addBtn').addEventListener('click', function () {
       if (!img.src || img.width === 0) { alert('이미지 먼저!'); return; }
-      // 목록 잠금은 AI와 분리했으므로, 실제로 AI가 필요한 이 지점에서만 막는다.
+      // 목록 잠금이 이미 AI 준비 전 선택을 막지만, 드래그&드롭·붙여넣기 경로를 위해 한 번 더 확인한다.
       if (!window._aiReady) { alert('AI 준비 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
       addMode = !addMode;
       if (addMode) { this.classList.add('active'); this.textContent = '취소(ESC)'; c2.style.cursor = 'crosshair'; }
@@ -2744,12 +2744,10 @@
           gallery.appendChild(card);
         });
 
-        // [개선] 저장된 세션을 다시 여는 데에는 AI 모델이 전혀 필요 없다
-        //   (loadSessionForEdit는 저장된 좌표를 그려 줄 뿐이다).
-        //   그런데 기존에는 AI 준비가 끝날 때까지 목록 클릭이 막혀 있어서,
-        //   Firestore가 아무리 빨라도 사용자는 AI 워밍업 시간만큼 기다려야 했다.
-        //   이제 목록이 그려지는 즉시 잠금을 푼다.
-        unlockGallery();
+        // [원복] 목록 잠금은 여기서 풀지 않는다.
+        //   목록에서 세션을 골라 불러온 뒤 곧바로 재분석·영역 추가로 이어지는 흐름이라,
+        //   모델이 준비되지 않은 상태에서 선택을 허용하면 결국 그 자리에서 기다리게 된다.
+        //   잠금 해제는 initAI()가 AI 준비를 마친 시점에서만 한다.
 
         console.info(
           `[갤러리] 완료 ${ms()}ms — 인덱스 조회 ${tQuery}ms / 재생성 ${tRebuild}ms / ` +
