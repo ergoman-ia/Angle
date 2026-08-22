@@ -10,6 +10,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.15.0/dist/tf-backend-webgl.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+  <!-- [콜드 스타트 개선] DNS·TLS 핸드셰이크를 미리 끝내 둔다.
+       첫 방문에서 tfjs·모델 가중치·Firebase를 받을 때 왕복 지연이 줄어든다. -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://storage.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://tfhub.dev" crossorigin>
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
@@ -639,7 +646,7 @@
           <!-- 2D panel -->
           <div class="panel panel-2d">
             <div class="toolbar">
-              <button class="btn btn-blue" id="fileBtn" disabled>AI 준비 중...</button>
+              <button class="btn btn-blue" id="fileBtn">이미지 선택</button>
               <input type="file" id="fileInput" accept="image/*">
               <button class="btn btn-teal" id="addBtn">+ 영역 추가</button>
               <button class="btn btn-red" id="delBtn">현재 삭제</button>
@@ -932,7 +939,9 @@
         } catch (e) { }
 
         initProg.stop();   // [개선6] 진행률 타이머 정지 후 완료 표시(100% 도달)
-        statusMsg.textContent = `✅ 준비완료 100% (${backend.toUpperCase()}${perfProfile === 'lo' ? ' · 경량 모드' : ' 가속'}) — 이미지를 선택하세요`;
+        // 백엔드·프로파일 표기는 화면에서 빼고 콘솔에만 남긴다(문제 추적용).
+        console.info(`[AI] 준비 완료 — 백엔드 ${backend.toUpperCase()} · 프로파일 ${perfProfile}`);
+        statusMsg.textContent = '✅ 준비 완료 100% — 이미지를 선택하세요';
         statusMsg.style.color = '#22c55e';
 
         // [개선5] AI 준비 완료 → 이미지 선택 활성화.
@@ -977,7 +986,42 @@
         unlockGallery();
       }
     }
-    initAI();
+
+    /* =====================================================================
+       [콜드 스타트 개선] AI 지연 초기화
+       -------------------------------------------------------------------
+       첫 방문에서 무거운 건 Firestore가 아니라 AI 자원 다운로드다.
+       tfjs 본체 + MoveNet MultiPose + Thunder 모델 가중치까지 수 MB를 받고
+       GPU 셰이더까지 컴파일한 뒤에야 화면이 쓸 만해진다.
+       두 번째 방문이 빨랐던 건 이것들이 브라우저 캐시에 남아서다.
+
+       그런데 '저장 내역을 열어 다시 보는' 작업에는 AI가 전혀 필요 없다.
+       그래서 AI 초기화를 페이지 로드 직후가 아니라
+         (1) 갤러리가 다 그려진 뒤의 유휴 시간, 또는
+         (2) 사용자가 이미지 선택·영역 추가를 눌러 실제로 필요해진 순간
+       중 먼저 오는 쪽에 시작한다. 목록 조회와 대역폭을 다투지도 않는다.
+    ===================================================================== */
+    let _aiStarted = false;
+    window._aiInitP = null;
+    function ensureAI() {
+      if (!_aiStarted) {
+        _aiStarted = true;
+        console.info('[AI] 초기화 시작');
+        window._aiInitP = initAI();
+      }
+      return window._aiInitP;
+    }
+    window.ensureAI = ensureAI;
+
+    // 갤러리 렌더가 끝나면 loadGallery가 scheduleAI()를 부른다.
+    // 갤러리가 실패하거나 DB가 없는 경우를 대비해 3초 뒤 보조 트리거도 둔다.
+    window.scheduleAI = function () {
+      if (_aiStarted) return;
+      const start = () => ensureAI();
+      if (window.requestIdleCallback) requestIdleCallback(start, { timeout: 1500 });
+      else setTimeout(start, 300);
+    };
+    setTimeout(() => window.scheduleAI(), 3000);
 
     function drawPlaceholder() {
       ctx.fillStyle = '#f1f4f8'; ctx.fillRect(0, 0, 880, 580);
@@ -1027,7 +1071,16 @@
       window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
     }
 
-    document.getElementById('fileBtn').onclick = () => document.getElementById('fileInput').click();
+    document.getElementById('fileBtn').onclick = async () => {
+      // AI가 아직이면 이 순간 시작하고, 준비될 때까지 기다린 뒤 파일 창을 연다.
+      if (!window._aiReady) {
+        statusMsg.textContent = 'AI 준비 중... 잠시만 기다려 주세요';
+        statusMsg.style.color = '#f59e0b';
+        try { await ensureAI(); } catch (e) { }
+        if (!window._aiReady) { alert('AI 초기화에 실패했습니다. 콘솔을 확인해 주세요.'); return; }
+      }
+      document.getElementById('fileInput').click();
+    };
 
     // ── [개선] 이미지 로드 공통 함수 — 파일선택 · 드래그&드롭 · 클립보드 붙여넣기에서 공용 ──
     // [개선2-메모리] 초고해상도 사진은 로드 시점에 최대 3200px로 축소.
@@ -1568,8 +1621,15 @@
     // Events
     document.getElementById('addBtn').addEventListener('click', function () {
       if (!img.src || img.width === 0) { alert('이미지 먼저!'); return; }
-      // 목록 잠금을 AI 준비와 분리했으므로, 실제 AI가 필요한 이 지점에서 막는다.
-      if (!window._aiReady) { alert('AI 준비 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+      // 실제로 AI가 필요한 지점 — 아직이면 여기서 시작해 준비될 때까지 기다린다.
+      if (!window._aiReady) {
+        statusMsg.textContent = 'AI 준비 중... 잠시만 기다려 주세요';
+        statusMsg.style.color = '#f59e0b';
+        ensureAI().then(() => {
+          if (window._aiReady) { statusMsg.textContent = '준비 완료 — 다시 눌러 주세요'; statusMsg.style.color = '#22c55e'; }
+        });
+        return;
+      }
       addMode = !addMode;
       if (addMode) { this.classList.add('active'); this.textContent = '취소(ESC)'; c2.style.cursor = 'crosshair'; }
       else { this.classList.remove('active'); this.textContent = '+ 영역 추가'; c2.style.cursor = 'crosshair'; selRect = null; drawAll(); }
@@ -2323,7 +2383,7 @@
         alert('오류가 발생했습니다. 콘솔을 확인하세요.');
         statusMsg.textContent = '저장 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
-        this.disabled = false; if (fileBtn) fileBtn.disabled = !window._aiReady;   // [개선5] AI 준비 상태 반영
+        this.disabled = false; if (fileBtn) fileBtn.disabled = false;   // 클릭 시점에 ensureAI()가 처리
         c2.style.pointerEvents = 'auto'; c2.style.opacity = '1';
       }
     });
@@ -2588,6 +2648,7 @@
         //   Firestore가 아무리 빨라도 사용자는 AI 워밍업 시간만큼 기다려야 했다.
         //   이제 목록이 그려지는 즉시 잠금을 푼다.
         unlockGallery();
+        if (window.scheduleAI) window.scheduleAI();   // 목록이 다 뜬 뒤에 AI 다운로드 시작
 
         console.info(
           `[갤러리] 완료 ${ms()}ms — 인덱스 조회 ${tQuery}ms / 재생성 ${tRebuild}ms / ` +
@@ -2661,7 +2722,7 @@
         console.error(err); alert('삭제 중 오류가 발생했습니다.');
         statusMsg.textContent = '삭제 실패'; statusMsg.style.color = '#e74c3c';
       } finally {
-        if (fileBtn) fileBtn.disabled = !window._aiReady;   // [개선5] AI 준비 상태 반영
+        if (fileBtn) fileBtn.disabled = false;   // 클릭 시점에 ensureAI()가 처리
         if (saveDbBtn) saveDbBtn.disabled = false;
         c2.style.pointerEvents = 'auto'; c2.style.opacity = '1';
       }
